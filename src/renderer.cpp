@@ -16,13 +16,12 @@ using namespace trivox;
 #define FAST_COEFF 5.0f
 #define RESIZE_CD 0.25f
 
-Renderer::Renderer(World& w, const RendererConfig& cfg, const Vector2& winSize, const std::string& winName) :
+Renderer::Renderer(World::Ptr w, const RendererConfig& cfg, const Vector2& winSize, const std::string& winName) :
 	_w(w),
     _cfg(cfg),
 	_baseWindowSize(winSize),
 	_windowSize(winSize),
-	_windowName(winName),
-    _pyramid(cfg.minMaxPow, cfg.radius)
+	_windowName(winName)
 {
     _redrawer = std::thread([&]() {
         _init();
@@ -103,7 +102,7 @@ void Renderer::_input() {
 }
 
 void Renderer::_render() {
-    _time = _w._time;
+    _time = _w->time();
     SetShaderValue(_shader, GetShaderLocation(_shader, "TIME"), &_time, SHADER_ATTRIB_FLOAT);
     
     Matrix matView = GetCameraViewMatrix(&_cam);

@@ -1,39 +1,36 @@
 #pragma once
 
-#include "types.h"
+#include "raylib.h"
+#include "scene.h"
 
-namespace trivox {
+class World {
+protected:
+    float _start, _time = 0;
+    Scenes _scenes;
 
-    class Renderer;
+public:
 
-    struct WorldConfig {
+    float time() {
+        return _time;
+    }
+
+    const Scenes& scenes() {
+        return _scenes;
+    }
+
+    virtual void init() {
+        _start = GetTime();
     };
 
-    class World {
-        friend class Renderer;
-    public:
-        World(WorldConfig config) : _config(config) {
-            _startTime = std::chrono::system_clock::now();
-        }
+    virtual void reset() {
+        init();
+    }
 
-        void generate();
-        void update();
+    virtual void update() {
+        _time = GetTime() - _start;
+    }
 
-        void lock() {
-            _lock.lock();
-        }
+    DECLARE_PTR_TYPE(World);
+};
 
-        void unlock() {
-            _lock.unlock();
-        }
-
-    private:
-        WorldConfig _config;
-        std::mutex _lock;
-
-        std::chrono::system_clock::time_point _startTime;
-        double _time = 0.0;
-        float _dt = 0.0;
-        bool _first = true;
-    };   
-}
+World::Ptr create_test0();

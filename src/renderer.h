@@ -1,6 +1,7 @@
 #pragma once
 
 #include <thread>
+#include <string>
 
 #include "raylib.h"
 #include "world.h"
@@ -17,7 +18,7 @@ namespace trivox
 	class Renderer
 	{
 	public:
-		Renderer(World& w, const RendererConfig& cfg, const Vector2& winSize, const std::string& winName);
+		Renderer(World::Ptr w, const RendererConfig& cfg, const Vector2& winSize, const std::string& winName);
 		~Renderer();
 
 		bool done = false;
@@ -25,15 +26,13 @@ namespace trivox
 	private:
 		std::thread _redrawer;
 
-		World& _w;
+		World::Ptr _w;
 		
 		RendererConfig _cfg;
 
 		Vector2 _windowSize, _baseWindowSize;
 		std::string _windowName;
 		float _lastResizeTime;
-
-		RenderPyramid _pyramid;
 
 		Shader _shader;
 		Texture2D _shTex;

@@ -8,19 +8,10 @@ project(TRIVOX VERSION 1.0 DESCRIPTION "raytraced oct-tree voxel 3d engine" LANG
 
 # TARGET
 set(IVOXEL_SOURCE_FILES
-    "src/renderer.h"
-    "src/renderer.cpp"
-    "src/render_pyramid.cpp"
-    "src/types.h"
-    "src/types.cpp"
-    "src/vec_ops.h"
-    "src/vec_funcs.h"
-    "src/vec_funcs.cpp"
-    "src/world.h"
-    "src/world.cpp"
-    "src/util.h"
-    "src/util.cpp"
     "src/main.cpp"
+    "src/renderer.cpp"
+    "src/s/s_test0.cpp"
+    "src/w/w_test0.cpp"
 )
 add_executable(TRIVOX ${IVOXEL_SOURCE_FILES})
 target_include_directories(TRIVOX PUBLIC "src")
