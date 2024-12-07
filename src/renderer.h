@@ -3,7 +3,6 @@
 #include <thread>
 
 #include "raylib.h"
-#include "raymath.h"
 #include "world.h"
 
 #include <rcamera.h>
