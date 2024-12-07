@@ -27,7 +27,9 @@ Renderer::Renderer(World& w, const RendererConfig& cfg, const Vector2& winSize, 
     _redrawer = std::thread([&]() {
         _init();
         while (!WindowShouldClose()) {
+            _moveCamera();
             _render();
+            _input();
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
     	}
         CloseWindow();
@@ -64,23 +66,13 @@ void Renderer::_updateShaderSize() {
     _lastResizeTime = _time;
 }
 
-void AllocateMeshData(Mesh* mesh, int triangleCount)
-{
-    mesh->vertexCount = triangleCount * 3;
-    mesh->triangleCount = triangleCount;
-
-    mesh->vertices = (float*)MemAlloc(mesh->vertexCount * 3 * sizeof(float));
-    mesh->texcoords = (float*)MemAlloc(mesh->vertexCount * 2 * sizeof(float));
-    mesh->normals = (float*)MemAlloc(mesh->vertexCount * 3 * sizeof(float));
-}
-
-void Renderer::_render() {
+void Renderer::_moveCamera() {
     bool shift = IsKeyDown(KEY_LEFT_SHIFT);
     float speed = SPEED * (shift ? FAST_COEFF : 1.0f);
 
     float forwards = ((IsKeyDown(KEY_W)) - (IsKeyDown(KEY_S))) * speed;
     float sideways = ((IsKeyDown(KEY_D)) - (IsKeyDown(KEY_A))) * speed;
-    float vertical = ((IsKeyDown(KEY_E)) - (IsKeyDown(KEY_Q))) * speed;
+    float vertical = ((IsKeyDown(KEY_Q)) - (IsKeyDown(KEY_E))) * speed;
 
     Vector2 mdelta = GetMouseDelta();
     Vector3 rot = (_time - _lastResizeTime > RESIZE_CD) ? (Vector3{mdelta.x, mdelta.y, 0.0f} * 0.05f) : Vector3Zero();
@@ -93,7 +85,24 @@ void Renderer::_render() {
     UpdateCameraPro(&_cam, camUp, rot, 0.0f);
     CameraMoveForward(&_cam, forwards, false);
     CameraMoveRight(&_cam, sideways, false);
+}
 
+void Renderer::_input() {
+    if (IsKeyPressed(KEY_F)) {
+        if (!IsWindowFullscreen()) {
+            _windowSize = {(float)GetMonitorWidth(0), (float)GetMonitorHeight(0)};
+            SetWindowSize(_windowSize.x, _windowSize.y);
+        }
+        ToggleFullscreen();
+        if (!IsWindowFullscreen()) {
+            _windowSize = _baseWindowSize;
+            SetWindowSize(_windowSize.x, _windowSize.y);
+        }
+        _updateShaderSize();
+    }
+}
+
+void Renderer::_render() {
     _time = _w._time;
     SetShaderValue(_shader, GetShaderLocation(_shader, "TIME"), &_time, SHADER_ATTRIB_FLOAT);
     
@@ -117,17 +126,4 @@ void Renderer::_render() {
         EndShaderMode();
     }
     EndDrawing();
-
-    if (IsKeyPressed(KEY_F)) {
-        if (!IsWindowFullscreen()) {
-            _windowSize = {(float)GetMonitorWidth(0), (float)GetMonitorHeight(0)};
-            SetWindowSize(_windowSize.x, _windowSize.y);
-        }
-        ToggleFullscreen();
-        if (!IsWindowFullscreen()) {
-            _windowSize = _baseWindowSize;
-            SetWindowSize(_windowSize.x, _windowSize.y);
-        }
-        _updateShaderSize();
-    }
 }

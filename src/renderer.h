@@ -48,6 +48,8 @@ namespace trivox
 
 		void _init();
 		void _updateShaderSize();
+		void _moveCamera();
+		void _input();
 		void _render();
 	};
 }
