@@ -4,39 +4,46 @@ set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard to use")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-project(TRIVOX VERSION 1.0 DESCRIPTION "raytraced oct-tree voxel 3d engine" LANGUAGES CXX)
+project(TRIVOX VERSION 1.0 DESCRIPTION "raytraced oct-tree voxel 3d engine" LANGUAGES CXX C)
 
-# TARGET
-set(IVOXEL_SOURCE_FILES
+# TARGETS
+add_executable(embedfile src/embedfile.c)
+add_custom_command(OUTPUT res_icon.c          COMMAND embedfile res_icon          ${TRIVOX_SOURCE_DIR}/res/icon.png      EPENDS ${TRIVOX_SOURCE_DIR}/res/icon.png)
+add_custom_command(OUTPUT res_raytrace_frag.c COMMAND embedfile res_raytrace_frag ${TRIVOX_SOURCE_DIR}/res/raytrace.frag DEPENDS ${TRIVOX_SOURCE_DIR}/res/raytrace.frag)
+
+set(TRIVOX_SOURCE_FILES
+    "src/memory.hpp"
+    "src/types.hpp"
+    "src/world.cpp"
+    "src/render.cpp"
     "src/main.cpp"
-    "src/renderer.cpp"
-    "src/s/s_test0.cpp"
-    "src/w/w_test0.cpp"
+    res_icon.c
+    res_raytrace_frag.c
+    "res/icon.rc"
 )
-add_executable(TRIVOX ${IVOXEL_SOURCE_FILES})
+add_executable(TRIVOX ${TRIVOX_SOURCE_FILES})
 target_include_directories(TRIVOX PUBLIC "src")
 
 # DEPENDENCIES
-find_package(Eigen3 CONFIG REQUIRED)
-target_link_libraries(TRIVOX PUBLIC Eigen3::Eigen)
-
 set(RAYLIB_VERSION 5.5)
-add_compile_definitions(RAYMATH_DISABLE_CPP_OPERATORS)
 find_package(raylib ${RAYLIB_VERSION} QUIET) # QUIET or REQUIRED
 if (NOT raylib_FOUND) # If there's none, fetch and build raylib
-  include(FetchContent)
-  FetchContent_Declare(
-    raylib
-    DOWNLOAD_EXTRACT_TIMESTAMP OFF
-    URL https://github.com/raysan5/raylib/archive/refs/tags/${RAYLIB_VERSION}.tar.gz
-  )
-  FetchContent_GetProperties(raylib)
-  if (NOT raylib_POPULATED) # Have we downloaded raylib yet?
-    set(FETCHCONTENT_QUIET NO)
-    FetchContent_MakeAvailable(raylib)
-    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE) # don't build the supplied examples
-  endif()
+    include(FetchContent)
+    FetchContent_Declare(
+        raylib
+        DOWNLOAD_EXTRACT_TIMESTAMP OFF
+        URL https://github.com/raysan5/raylib/archive/refs/tags/${RAYLIB_VERSION}.tar.gz
+    )
+      FetchContent_GetProperties(raylib)
+      if (NOT raylib_POPULATED)
+          set(FETCHCONTENT_QUIET NO)
+          set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+          FetchContent_MakeAvailable(raylib)
+          set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE) # don't build the supplied examples
+      endif()
 endif()
+target_compile_options(raylib PUBLIC -DRAYMATH_DISABLE_CPP_OPERATORS)
+target_compile_options(raylib PUBLIC -DGRAPHICS_API_OPENGL_33)
 target_link_libraries(TRIVOX PUBLIC raylib)
 
 add_custom_target(prepare_rel

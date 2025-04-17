@@ -1,14 +1,11 @@
-#include "renderer.h"
+#include "types.hpp"
 
-int main()
-{
-	auto w = create_test0();
+int main() {
 
-	trivox::RendererConfig cfgR{10, {0, 3}};
-	trivox::Renderer r(w, cfgR, {1024.0f, 1024.0f}, "TRIVOX");
+	World w;
 
-	while (!r.done) {
-		w->update();
-		std::this_thread::sleep_for(std::chrono::milliseconds(1));
-	}
+	Renderer r(w);
+	r.startRender();
+
+	return 0;
 }
