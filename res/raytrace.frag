@@ -1,9 +1,33 @@
-#version 330
+#version 430
+
+const uint TRIVOX_MAX_ROOMS = 16;
 
 in vec2 fragTexCoord;
 in vec4 fragColor;
 
 out vec4 outColor;
+
+struct Room {
+    uvec3 size;
+    vec3 cellSz;
+    uint firstCellIdx;
+};
+
+struct RoomRef {
+    mat4 matrix;
+    vec3 color;
+    uint idx;
+};
+
+layout(std140, binding = 0) 
+buffer Rooms
+{
+    Room rooms_data[];
+};
+layout (std140, binding = 1) 
+buffer RoomRefs {
+    RoomRef roomrefs_data[];
+};
 
 uniform vec2 RESOLUTION;
 uniform float TIME;
@@ -76,16 +100,22 @@ void main() {
     vec4 dirw = CAM_MVP * vec4(coeffs.x, coeffs.y, 1.0, 1.0);
     vec3 dir = normalize(dirw.xyz/dirw.w - start);
     vec3 col = texture(texture0, fragTexCoord).rgb;
-    Sphere sph0 = Sphere(vec3(0.), .5, vec3(1., 0., 0.));
-    Sphere sph1 = Sphere(vec3(20.), .5, vec3(0., .5, 1.));
     bool intersect = false;
-    if (length(start - sph0.center) < length(start - sph1.center)) {
-        if (raytrace_sphere(start, dir, sph0, col) || raytrace_sphere(start, dir, sph1, col))
-            intersect = true;
-    } else {
-        if (raytrace_sphere(start, dir, sph1, col) || raytrace_sphere(start, dir, sph0, col))
-            intersect = true;
+
+    for (int i = 0; i < TRIVOX_MAX_ROOMS; ++i) {
+        RoomRef rr = roomrefs_data[i];
+        if (rr.idx > 0) {
+            Room r = rooms_data[0];
+            vec3 origin = rr.matrix[3].xyz;
+            vec3 center = origin + mat3(rr.matrix) * (vec3(r.size) * .5);
+            Sphere sphere = Sphere(center, .5, rr.color);
+            if (raytrace_sphere(start, dir, sphere, col)) {
+                intersect = true;
+                break;
+            }
+        }
     }
+
     vec3 frontCol = texture(texture1, fragTexCoord).rgb;
     if (length(frontCol) == 0)
         outColor = vec4(col, 1.0);

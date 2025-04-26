@@ -1,4 +1,5 @@
 #include <array>
+#include <cstring>
 
 #include "base.h"
 #include "memory.hpp"
@@ -57,24 +58,28 @@ struct Cell {
     u32 distance      = 0;
 };
 
-// vec3 x 3 : size | cellsz | fcid null null
+// size pad | cellsz pad | fcid
 struct Room {
     uvec3 size       = {0, 0, 0};
+    float _padding0;
     vec3 cellSz      = {0, 0, 0};
     u32 firstCellIdx = 0;
-    u32 _null0;
-    u32 _null1;
+    Room() = default;
+    Room(uvec3 size, vec3 cellSz, u32 firstCellIdx = 0) : size(size), cellSz(cellSz), firstCellIdx(firstCellIdx) {}
 };
 
-// vec4 x 5 : idx null null null | [mat : 4 x vec4]
+// idx | [mat : 4 x vec4]
 struct RoomRef {
+    mat _matrix;
+    vec3 color;
     u32 idx;
-    u32 _null0;
-    u32 _null1;
-    u32 _null2;
-    Matrix matrix;
     RoomRef() = default;
-    RoomRef(u32 idx, Matrix mat) : idx(idx + 1), matrix(mat) { }
+    RoomRef(u32 idx, const mat4& mat) : idx(idx + 1), _matrix(mat) { }
+    mat4 matrix() {
+        mat4 res;
+        memcpy(res.data(), &_matrix, sizeof(mat));
+        return res;
+    }
 };
 
 //struct World {
@@ -104,7 +109,7 @@ struct World {
     World();
 
     u64 addRoom(const Room& room);
-    u64 addRoomRef(u64 rid, const Matrix& matrix);
+    u64 addRoomRef(u64 rid, const mat4& matrix);
 
     void drawRoomGrids(Vector3 campos, bool front = false);
 };

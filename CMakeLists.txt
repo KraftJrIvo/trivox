@@ -26,8 +26,8 @@ target_include_directories(TRIVOX PUBLIC "src")
 
 # DEPENDENCIES
 set(RAYLIB_VERSION 5.5)
-find_package(raylib ${RAYLIB_VERSION} QUIET) # QUIET or REQUIRED
-if (NOT raylib_FOUND) # If there's none, fetch and build raylib
+find_package(raylib ${RAYLIB_VERSION} QUIET)
+if (NOT raylib_FOUND)
     include(FetchContent)
     FetchContent_Declare(
         raylib
@@ -42,26 +42,22 @@ if (NOT raylib_FOUND) # If there's none, fetch and build raylib
           set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE) # don't build the supplied examples
       endif()
 endif()
+
+find_package(Eigen3 CONFIG REQUIRED)
+if (NOT Eigen3_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(
+        Eigen3
+        DOWNLOAD_EXTRACT_TIMESTAMP OFF
+        URL https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz
+    )
+    FetchContent_GetProperties(Eigen3)
+    if (NOT Eigen3_POPULATED)
+        FetchContent_MakeAvailable(Eigen3)
+    endif()
+endif()
+target_link_libraries(TRIVOX PUBLIC Eigen3::Eigen)
+
 target_compile_options(raylib PUBLIC -DRAYMATH_DISABLE_CPP_OPERATORS)
-target_compile_options(raylib PUBLIC -DGRAPHICS_API_OPENGL_33)
+target_compile_options(raylib PUBLIC -DGRAPHICS_API_OPENGL_43)
 target_link_libraries(TRIVOX PUBLIC raylib)
-
-add_custom_target(prepare_rel
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/Release
-)
-add_dependencies(raylib prepare_rel)
-
-add_custom_target(copy_assets_rel
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_LIST_DIR}/res ${CMAKE_CURRENT_BINARY_DIR}/Release/res
-)
-add_dependencies(raylib copy_assets_rel)
-
-add_custom_target(prepare_deb
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/Debug
-)
-add_dependencies(raylib prepare_deb)
-
-add_custom_target(copy_assets_deb
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_LIST_DIR}/res ${CMAKE_CURRENT_BINARY_DIR}/Debug/res
-)
-add_dependencies(raylib copy_assets_deb)

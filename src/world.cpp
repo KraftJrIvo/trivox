@@ -2,6 +2,7 @@
 #include "raylib.h"
 #include "raymath.h"
 #include "types.hpp"
+#include <Eigen/src/Geometry/AngleAxis.h>
 
 World::World() :
     vertices(TRIVOX_MAX_TOTAL_VERTS),
@@ -12,40 +13,50 @@ World::World() :
     rooms(TRIVOX_MAX_ROOMS),
     roomRefs(TRIVOX_MAX_ROOMS)
 { 
-    auto rid = addRoom(Room{uvec3{10, 10, 10}, vec3{1.0f, 1.0f, 1.0f}});
-    addRoomRef(rid, MatrixIdentity());
-    addRoomRef(rid, MatrixTranslate(20, 20, 20));
-    addRoomRef(rid, MatrixMultiply(MatrixRotateY(PI/4.f), MatrixTranslate(10, 0, 0)));
+    auto rid = addRoom(Room(uvec3{10, 10, 10}, vec3{1.0f, 1.0f, 1.0f}));
+    addRoomRef(rid, mat4::Identity());
+    mat4 mat = mat4::Identity();
+    mat.TRAVEC += vec3{20, 20, 20};
+    addRoomRef(rid, mat);
+    mat = mat4::Identity();
+    mat.ROTMAT = Eigen::AngleAxisf(-PI/4.f, vec3{1.0f, 0.0f, 0}).matrix() * Eigen::AngleAxisf(PI/4.f, vec3{0, 1.0f, 0}).matrix();
+    mat.TRAVEC += vec3{10, 10, 0};
+    addRoomRef(rid, mat);
+    roomRefs.at(0).color = vec3{1.0, 0, 0};
+    roomRefs.at(1).color = vec3{1.0, 1.0, 0};
+    roomRefs.at(2).color = vec3{0, 0, 1.0};
 }
 
 u64 World::addRoom(const Room& room) {
     auto rid = rooms.acquire(room);
-    auto ncells = room.size.x * room.size.y * room.size.z;
+    auto ncells = room.size.x() * room.size.y() * room.size.z();
     rooms.at(rid).firstCellIdx = cells.acquire(Cell(), ncells);
     return rid;
 }
 
-u64 World::addRoomRef(u64 rid, const Matrix& matrix) {
+u64 World::addRoomRef(u64 rid, const mat4& matrix) {
     return roomRefs.acquire(RoomRef((u32)rid, matrix));
 }
 
-void drawRoomGrid(Vector3 A, Vector3 B, Vector3 C, Vector3 D, int n1, int n2, Vector3 campos, bool front) {
+void drawRoomGrid(vec3 A, vec3 B, vec3 C, vec3 D, int n1, int n2, vec3 campos, bool front) {
     auto center = A + (B - A) / 2 + (D - A) / 2;
-    auto tocam = Vector3Normalize(campos - center);
-    auto normal = Vector3Normalize(Vector3CrossProduct((B - A), (C - A)));
-    if (front == (Vector3DotProduct(normal, tocam) > 0)) {
+    auto tocam = (campos - center).normalized();
+    auto normal = ((B - A).cross((C - A))).normalized();
+    if (front == (normal.dot(tocam) > 0)) {
         for (int i = 0; i <= n1; ++i) {
             auto st1 = i * (D - A) / ((float)n1);
-            DrawLine3D(A + st1, B + st1, GRAY);
+            DrawLine3D(toray3(A + st1), toray3(B + st1), GRAY);
         }
         for (int i = 0; i <= n2; ++i) {
             auto st2 = i * (B - A) / ((float)n2);
-            DrawLine3D(A + st2, D + st2, GRAY);
+            DrawLine3D(toray3(A + st2), toray3(D + st2), GRAY);
         }
     }
 }
 
-void World::drawRoomGrids(Vector3 campos, bool front) {
+void World::drawRoomGrids(Vector3 campos, bool front) 
+{    
+    auto ecampos = fromray3(campos);
 
     for (int i = 0; i < roomRefs.count(); ++i) {
 
@@ -53,24 +64,25 @@ void World::drawRoomGrids(Vector3 campos, bool front) {
         auto& room = rooms.at(roomRefs.at(i).idx - 1);
         Room rrr = room;
         
-        auto roomCenter = vec3{rr.matrix.m12,rr.matrix.m13,rr.matrix.m14};
-        auto roomHalfSz = room.cellSz * vec3{(float)room.size.x, (float)room.size.y, (float)room.size.z} * 0.5f;
-        auto roomQuat = QuaternionFromMatrix(rr.matrix);
+        vec3 roomHalfSz = room.cellSz.cwiseProduct(vec3{(float)room.size.x(), (float)room.size.y(), (float)room.size.z()}) * 0.5f;
+        mat4 roomMat = rr.matrix();
+        mat3 roomRot = roomMat.ROTMAT;
+        vec3 roomCenter = roomMat.TRAVEC + roomMat.ROTMAT * roomHalfSz;
         
-        auto A = roomCenter + Vector3RotateByQuaternion(-roomHalfSz * vec3{ 1, -1,  1}, roomQuat);
-        auto B = roomCenter + Vector3RotateByQuaternion(-roomHalfSz * vec3{ 1, -1, -1}, roomQuat);
-        auto C = roomCenter + Vector3RotateByQuaternion(-roomHalfSz * vec3{-1, -1,  1}, roomQuat);
-        auto D = roomCenter + Vector3RotateByQuaternion(-roomHalfSz * vec3{-1, -1, -1}, roomQuat);
-        auto E = roomCenter + Vector3RotateByQuaternion(-roomHalfSz * vec3{ 1,  1,  1}, roomQuat);
-        auto F = roomCenter + Vector3RotateByQuaternion(-roomHalfSz * vec3{ 1,  1, -1}, roomQuat);
-        auto G = roomCenter + Vector3RotateByQuaternion(-roomHalfSz * vec3{-1,  1,  1}, roomQuat);
-        auto H = roomCenter + Vector3RotateByQuaternion(-roomHalfSz * vec3{-1,  1, -1}, roomQuat);
+        vec3 A = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{ 1, -1,  1}));
+        vec3 B = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{ 1, -1, -1}));
+        vec3 C = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{-1, -1,  1}));
+        vec3 D = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{-1, -1, -1}));
+        vec3 E = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{ 1,  1,  1}));
+        vec3 F = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{ 1,  1, -1}));
+        vec3 G = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{-1,  1,  1}));
+        vec3 H = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{-1,  1, -1}));
         
-        drawRoomGrid(A, B, D, C, room.size.z, room.size.x, campos, front);
-        drawRoomGrid(F, B, A, E, room.size.y, room.size.z, campos, front);
-        drawRoomGrid(C, D, H, G, room.size.z, room.size.y, campos, front);
-        drawRoomGrid(B, F, H, D, room.size.y, room.size.x, campos, front);
-        drawRoomGrid(E, A, C, G, room.size.y, room.size.x, campos, front);
-        drawRoomGrid(G, H, F, E, room.size.z, room.size.x, campos, front);
+        drawRoomGrid(A, B, D, C, room.size.z(), room.size.x(), ecampos, front);
+        drawRoomGrid(F, B, A, E, room.size.y(), room.size.z(), ecampos, front);
+        drawRoomGrid(C, D, H, G, room.size.z(), room.size.y(), ecampos, front);
+        drawRoomGrid(B, F, H, D, room.size.y(), room.size.x(), ecampos, front);
+        drawRoomGrid(E, A, C, G, room.size.y(), room.size.x(), ecampos, front);
+        drawRoomGrid(G, H, F, E, room.size.z(), room.size.x(), ecampos, front);
     }
 }

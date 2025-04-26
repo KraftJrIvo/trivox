@@ -25,8 +25,8 @@ void Renderer::_updateShaderSize() {
 }
 
 void Renderer::_resetCamPos() {
-    _cam.position = { 0.0f, 2.0f, 8.0f };
-    _cam.target = { 0.0f, 0.0f, -1.0f };
+    _cam.position = { 0.0f, 2.0f, -8.0f };
+    _cam.target = { 0.0f, 0.0f, 1.0f };
     _cam.up = { 0.0f, 1.0f, 0.0f };
     _cam.fovy = 90.0f;      
     _cam.projection = CAMERA_PERSPECTIVE;
@@ -59,7 +59,7 @@ void Renderer::_input() {
     float vertical = ((IsKeyDown(KEY_E)) - (IsKeyDown(KEY_Q))) * speed;
 
     Vector2 mdelta = GetMouseDelta();
-    bool canRot = (_time - _lastReszTime > RESIZE_CD) && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+    bool canRot = (_time - _lastReszTime > RESIZE_CD) && (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) || IsCursorHidden());
     Vector3 rot = canRot ? (Vector3{mdelta.x, mdelta.y, 0.0f} * 0.2f) : Vector3Zero();
 
     Vector3 dir = Vector3Normalize(Vector3{_cam.target.x - _cam.position.x, _cam.target.y - _cam.position.y, _cam.target.z - _cam.position.z});
@@ -82,7 +82,6 @@ void Renderer::_input() {
         }
         ToggleFullscreen();
         if (!IsWindowFullscreen()) {
-            EnableCursor();
             auto newWinSz = _baseWinSz;
             float xCoeff = newWinSz.x / _winSz.x;       
             float yCoeff = newWinSz.y / _winSz.y;       
@@ -95,10 +94,21 @@ void Renderer::_input() {
         _baseWinSz = _winSz;
         _updateShaderSize();
     }
+
+    if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && IsGestureDetected(GESTURE_DOUBLETAP))
+        DisableCursor();
+        
+    if (IsKeyPressed(KEY_LEFT_CONTROL) || IsKeyPressed(KEY_ESCAPE))
+        EnableCursor();
 }
 
 void Renderer::startRender()
 {
+    auto ssboRooms = rlLoadShaderBuffer(_w.rooms.size(), _w.rooms.data(), RL_DYNAMIC_DRAW);
+    auto ssboRoomRefs = rlLoadShaderBuffer(_w.roomRefs.size(), _w.roomRefs.data(), RL_DYNAMIC_DRAW);
+    rlBindShaderBuffer(ssboRooms, 0);
+    rlBindShaderBuffer(ssboRoomRefs, 1);
+
     while (!WindowShouldClose()) 
     {
         _time = GetTime();
@@ -124,14 +134,33 @@ void Renderer::startRender()
             EndMode3D();
         EndTextureMode();
 
+        rlUpdateShaderBuffer(ssboRooms, _w.rooms.data(), _w.rooms.size(), 0);
+        rlUpdateShaderBuffer(ssboRoomRefs, _w.roomRefs.data(), _w.roomRefs.size(), 0);
+
+        SetShaderValueMatrix(_shader, GetShaderLocation(_shader, "CAM_MVP"), mvp);
+        SetShaderValue(_shader, GetShaderLocation(_shader, "CAM_FOV"), &_cam.fovy, SHADER_ATTRIB_FLOAT);
+        SetShaderValue(_shader, GetShaderLocation(_shader, "CAM_POS"), &_cam.position, SHADER_ATTRIB_VEC3);
+        SetShaderValue(_shader, GetShaderLocation(_shader, "TIME"), &_time, SHADER_ATTRIB_FLOAT);
+
+        //rlEnableShader(_shader.id);
+        //rlSetUniformSampler(GetShaderLocation(_shader, "texture1"), _frontTex.texture.id);
+        //rlDisableShader();
+
+
         BeginDrawing();
-            SetShaderValueMatrix(_shader, GetShaderLocation(_shader, "CAM_MVP"), mvp);
-            SetShaderValue(_shader, GetShaderLocation(_shader, "CAM_FOV"), &_cam.fovy, SHADER_ATTRIB_FLOAT);
-            SetShaderValue(_shader, GetShaderLocation(_shader, "CAM_POS"), &_cam.position, SHADER_ATTRIB_VEC3);
-            SetShaderValue(_shader, GetShaderLocation(_shader, "TIME"), &_time, SHADER_ATTRIB_FLOAT);
+            //std::cout << _w.rooms.size() << "\n";
+            //std::cout << _w.roomRefs.size() << "\n";
             BeginShaderMode(_shader);
-                SetShaderValueTexture(_shader, GetShaderLocation(_shader, "texture1"), _frontTex.texture);
+                rlEnableShader(_shader.id);
+                rlSetUniformSampler(GetShaderLocation(_shader, "texture1"), _frontTex.texture.id);
                 DrawTextureRec(_backTex.texture, Rectangle{ 0, 0, (float)_backTex.texture.width, (float)-_backTex.texture.height }, (Vector2) { 0, 0 }, WHITE);
+                //std::vector<u8> data(_w.roomRefs.size());
+                //rlReadShaderBuffer(ssboRoomRefs, data.data(), data.size(), 0);
+                //for (auto i = 0; i < data.size(); ++i) {
+                //    std::cout << (int)data[i] << " ";
+                //}
+                //std::cout << sizeof(RoomRef) << "\n";
+                //std::cout << "\n";
             EndShaderMode();
         EndDrawing();
 

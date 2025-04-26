@@ -117,9 +117,9 @@ inline bool operator== (const Quaternion& q1, const Quaternion& q2) {
 }
 
 inline std::ostream& operator<<(std::ostream& os, const Matrix& m) {
-    os << m.m0 << ' ' << m.m1 << ' ' << m.m2 << ' ' << m.m3 << '\n'
-       << m.m4 << ' ' << m.m5 << ' ' << m.m6 << ' ' << m.m7 << '\n'
-       << m.m8 << ' ' << m.m9 << ' ' << m.m10 << ' ' << m.m11 << '\n'
-       << m.m12 << ' ' << m.m13 << ' ' << m.m14 << ' ' << m.m15;
+    os << m.m0 << ' ' << m.m4 << ' ' << m.m8 << ' ' << m.m12 << '\n'
+       << m.m1 << ' ' << m.m5 << ' ' << m.m9 << ' ' << m.m13 << '\n'
+       << m.m2 << ' ' << m.m6 << ' ' << m.m10 << ' ' << m.m14 << '\n'
+       << m.m3 << ' ' << m.m7 << ' ' << m.m11 << ' ' << m.m15;
     return os;
 }

@@ -1,5 +1,6 @@
 #include "base.h"
 #include <array>
+#include <cstddef>
 #include <limits>
 #include <vector>
 
@@ -38,6 +39,14 @@ public:
         _firstAvailableIdx(0)
     {
         _allocateMore(capacity);
+    }
+
+    T* data() {
+        return _data.data();
+    }
+
+    size_t size() {
+        return _capacity * sizeof(T);
     }
 
     u64 acquire(const T& obj, u64 count = 1) {
