@@ -60,12 +60,10 @@ struct Cell {
 
 // size pad | cellsz pad | fcid
 struct Room {
-    uvec3 size       = {0, 0, 0};
-    float _padding0;
-    vec3 cellSz      = {0, 0, 0};
+    vec3 size       = {0, 0, 0};
     u32 firstCellIdx = 0;
     Room() = default;
-    Room(uvec3 size, vec3 cellSz, u32 firstCellIdx = 0) : size(size), cellSz(cellSz), firstCellIdx(firstCellIdx) {}
+    Room(vec3 size, u32 firstCellIdx = 0) : size(size), firstCellIdx(firstCellIdx) {}
 };
 
 // idx | [mat : 4 x vec4]
@@ -82,21 +80,6 @@ struct RoomRef {
     }
 };
 
-//struct World {
-//    SharedObjArena<vec3>          vertices;
-//    SharedObjArena<ShapeUV>       shUVs;
-//    SharedObjArena<ShapeMaterial> shMaterials;
-//    SharedObjArena<Shape>         shapes;
-//    SharedObjArena<Cell>          cells;
-//    SharedObjArena<Room>          rooms;
-//    SharedObjArena<RoomRef>       roomRefs;
-//
-//    SharedObjPtrArray<RoomRef, TRIVOX_MAX_ROOMS> roomRefsArr;
-//
-//    World();
-//
-//    void addRoom(const Room& room, const Matrix& matrix);
-//};
 struct World {
     ObjArena<vec3>          vertices;
     ObjArena<ShapeUV>       shUVs;
@@ -124,6 +107,7 @@ struct Renderer {
     float _time, _lastReszTime;
     Shader _shader;
     RenderTexture2D _backTex, _frontTex;
+    bool _drawGrids = true;
     
     void _resetCamPos();
     void _updateShaderSize();

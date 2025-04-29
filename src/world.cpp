@@ -13,13 +13,13 @@ World::World() :
     rooms(TRIVOX_MAX_ROOMS),
     roomRefs(TRIVOX_MAX_ROOMS)
 { 
-    auto rid = addRoom(Room(uvec3{10, 10, 10}, vec3{1.0f, 1.0f, 1.0f}));
+    auto rid = addRoom(Room(vec3{10, 10, 10}));
     addRoomRef(rid, mat4::Identity());
     mat4 mat = mat4::Identity();
     mat.TRAVEC += vec3{20, 20, 20};
     addRoomRef(rid, mat);
     mat = mat4::Identity();
-    mat.ROTMAT = Eigen::AngleAxisf(-PI/4.f, vec3{1.0f, 0.0f, 0}).matrix() * Eigen::AngleAxisf(PI/4.f, vec3{0, 1.0f, 0}).matrix();
+    mat.ROTMAT = Eigen::AngleAxisf(-PI/8.f, vec3{1.0f, 0.0f, 0}).matrix() * Eigen::AngleAxisf(PI/4.f, vec3{0, 1.0f, 0}).matrix();
     mat.TRAVEC += vec3{10, 10, 0};
     addRoomRef(rid, mat);
     roomRefs.at(0).color = vec3{1.0, 0, 0};
@@ -64,7 +64,7 @@ void World::drawRoomGrids(Vector3 campos, bool front)
         auto& room = rooms.at(roomRefs.at(i).idx - 1);
         Room rrr = room;
         
-        vec3 roomHalfSz = room.cellSz.cwiseProduct(vec3{(float)room.size.x(), (float)room.size.y(), (float)room.size.z()}) * 0.5f;
+        vec3 roomHalfSz = room.size * 0.5f;
         mat4 roomMat = rr.matrix();
         mat3 roomRot = roomMat.ROTMAT;
         vec3 roomCenter = roomMat.TRAVEC + roomMat.ROTMAT * roomHalfSz;

@@ -100,6 +100,18 @@ void Renderer::_input() {
         
     if (IsKeyPressed(KEY_LEFT_CONTROL) || IsKeyPressed(KEY_ESCAPE))
         EnableCursor();
+
+    if (IsKeyPressed(KEY_G)) {
+        _drawGrids = !_drawGrids;
+        if (!_drawGrids) {
+            BeginTextureMode(_backTex);
+                ClearBackground(BLACK);
+            EndTextureMode();
+            BeginTextureMode(_frontTex);
+                ClearBackground(BLACK);
+            EndTextureMode();
+        }
+    }
 }
 
 void Renderer::startRender()
@@ -120,19 +132,21 @@ void Renderer::startRender()
         Matrix matProj = GetCameraProjectionMatrix(&_cam, 1.0);
         Matrix mvp = MatrixInvert(MatrixMultiply(matView, matProj));
 
-        BeginTextureMode(_backTex);
-            ClearBackground(BLACK);
-            BeginMode3D(_cam);
-                _w.drawRoomGrids(_cam.position);
-            EndMode3D();
-        EndTextureMode();
+        if (_drawGrids) {
+            BeginTextureMode(_backTex);
+                ClearBackground(BLACK);
+                BeginMode3D(_cam);
+                    _w.drawRoomGrids(_cam.position);
+                EndMode3D();
+            EndTextureMode();
 
-        BeginTextureMode(_frontTex);
-            ClearBackground(BLACK);
-            BeginMode3D(_cam);
-                _w.drawRoomGrids(_cam.position, true);
-            EndMode3D();
-        EndTextureMode();
+            BeginTextureMode(_frontTex);
+                ClearBackground(BLACK);
+                BeginMode3D(_cam);
+                    _w.drawRoomGrids(_cam.position, true);
+                EndMode3D();
+            EndTextureMode();
+        }
 
         rlUpdateShaderBuffer(ssboRooms, _w.rooms.data(), _w.rooms.size(), 0);
         rlUpdateShaderBuffer(ssboRoomRefs, _w.roomRefs.data(), _w.roomRefs.size(), 0);
