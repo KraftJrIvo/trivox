@@ -5,6 +5,10 @@ const uint TRIVOX_MAX_ROOMS = 16;
 const float POS_INF = 1. / 0.;
 const float NEG_INF = -1. / 0.;
 const float MIN_VSZ = 100.;
+const int MIN_LVL = 0;
+const int MAX_LVL = 3;
+const float FOG_DIST = 100.;
+const vec3 FOG_COLOR = vec3(0.);
 
 in vec2 fragTexCoord;
 in vec4 fragColor;
@@ -121,6 +125,8 @@ Intersection raytrace_box(Ray ray, Box box) {
         //result.col = localPos * .1;
         vec3 localExit = lray.o + lray.dir * tFar;
         result.exit = Ray(box.rot * localExit + box.o, ray.dir);
+        if (inside)
+            result.o = ray.o;
     }
     return result;
 }
@@ -157,28 +163,56 @@ Intersection raytrace_aac(Ray ray, AAC aac) {
     return result;
 }
 
+vec3 minIndicator(vec3 v) {
+    float minVal = min(min(v.x, v.y), v.z);
+    return vec3(
+        step(minVal, v.x) * step(v.x, minVal),
+        step(minVal, v.y) * step(v.y, minVal),
+        step(minVal, v.z) * step(v.z, minVal)
+    );
+}
+
 Intersection raytrace_room(Ray ray, RoomRef rr, Box box) {
     Intersection res;
     res.exists = false;
+
+    vec3 lcampos = (CAM_POS - box.o) * box.rot;
 
     Room r = rooms_data[rr.idx - 1];
     Ray lray = Ray(clamp((ray.o - box.o) * box.rot, vec3(EPS), r.sz - EPS), ray.dir * box.rot);
     bool inside = all(greaterThanEqual(lray.o, vec3(0.))) && all(lessThanEqual(lray.o, box.sz));
 
+    bool first = true;
+
     while (inside) {
-        vec3 cellc = floor(lray.o) + vec3(.5);
-        float vsz = (2. * atan(1. / length(cellc - CAM_POS))) * RESOLUTION.y;
-        float lvl = floor(log2(MIN_VSZ / vsz));
-        float csz = pow(2, lvl);
-        AAC aac = AAC(floor(lray.o / csz), csz);
-        Sphere sph = Sphere(aac.o + vec3(csz * .5), csz * .9);
-        res = raytrace_sphere(ray, sph);
+        float lvl, csz, vsz;
+        vec3 cellc;
+        for (int i = MAX_LVL; i >= MIN_LVL; --i) {
+            csz = pow(2, i);
+            cellc = floor(lray.o / csz) * csz + vec3(.5) * csz;
+            vsz = (2. * atan((csz * .5) / length(cellc - lcampos))) * RESOLUTION.y;
+            if (i == MIN_LVL || vsz < MIN_VSZ) {
+                lvl = float(i);
+                break;
+            }
+        }
+
+        //vec3 cellc = floor(lray.o) + vec3(.5);
+        //float vsz = (2. * atan(1. / length(cellc - lcampos))) * RESOLUTION.y;
+        //float lvl = clamp(floor(log2(MIN_VSZ / vsz)), 0., 3.);
+        //float csz = pow(2, lvl);
+
+        AAC aac = AAC(floor(lray.o / csz) * csz, csz);
+        Sphere sph = Sphere(aac.o + vec3(csz * .5), csz * .45);
+        res = raytrace_sphere(lray, sph);
         if (res.exists) {
+            res.o = box.rot * res.o + box.o;
             return res;
         } else {
-            res = raytrace_aac(ray, aac);
+            res = raytrace_aac(lray, aac);
             lray.o = res.exit.o + res.exit.dir * EPS;
             inside = all(greaterThanEqual(lray.o, vec3(0.))) && all(lessThanEqual(lray.o, box.sz));
+            res.exists = false;
         }
     }
 
@@ -187,19 +221,19 @@ Intersection raytrace_room(Ray ray, RoomRef rr, Box box) {
 
 Intersection raytrace_rooms(Ray ray) 
 {
-    float far = 25.;
     vec3 start = ray.o;
     bool first = true;
+    bool hit = false;
     float path = 0.;
     Intersection last;
     Intersection closest;
-    uint roomIdx = 0;
-    uint lastRoomIdx = 0;
+    uint rridx = 0;
+    uint lastRridx = 0;
     Box closestBox;
 
     closest.col = vec3(0.);
 
-    while ((first || closest.exists) && (path < far)) 
+    while ((first || closest.exists) && (path < FOG_DIST)) 
     {
         float minDist = POS_INF;
         closest.exists = false;
@@ -208,7 +242,7 @@ Intersection raytrace_rooms(Ray ray)
         {
             RoomRef rr = roomrefs_data[i];
 
-            if ((rr.idx == 0) || (!first && lastRoomIdx == i))
+            if ((rr.idx == 0) || (!first && lastRridx == i))
                 continue;
 
             Room r = rooms_data[0];
@@ -216,46 +250,44 @@ Intersection raytrace_rooms(Ray ray)
             Intersection inter = raytrace_box(ray, box);
 
             if (inter.exists) {
-                float dist = length(inter.exit.o - ray.o);
+                float dist = length(inter.o - ray.o);
                 if (dist < minDist) {
                     minDist = dist;
                     closest = inter;
-                    roomIdx = i;
+                    rridx = i;
                     closestBox = box;
                 }
             }
         }
 
         if (closest.exists) {
-            lastRoomIdx = roomIdx;
-            //float len = length(ray.o - closest.o);
+            lastRridx = rridx;
+            path += length(ray.o - closest.o);
+            ray.o = closest.o;
+            
+            Intersection local = raytrace_room(ray, roomrefs_data[rridx], closestBox);
 
-            //AAC aac = AAC(closestBox.o + closestBox.sz * .5, 2.25);
-            //Intersection local = raytrace_aac(ray, aac);
-            Box box = Box(closestBox.o + closestBox.sz * .5, mat3(1.), vec3(2.25));
-            Intersection local = raytrace_box(ray, box);
             if (local.exists) {
                 path += length(ray.o - local.o);
                 closest = local;
+                hit = true;
                 break;
             } else {
                 path += length(ray.o - closest.exit.o);
             }
-            //Intersection local = raytrace_room(ray, roomrefs_data[roomIdx], closestBox);
-            //if (local.exists) {
-            //    path += length(closest.o - local.o);
-            //    closest = local;
-            //    break;
-            //}
 
             
             ray = closest.exit;
         }
 
         first = false;
+        //break;
     }
 
-    closest.col = vec3(clamp(path / far, .001, 1.));
+    if (!hit)
+        path = FOG_DIST;
+
+    closest.col = mix(.5 * (closest.n + 1.), FOG_COLOR, clamp(path / FOG_DIST, .001, 1.));
 
     return closest;
 }

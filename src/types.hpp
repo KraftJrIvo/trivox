@@ -103,6 +103,7 @@ struct Renderer {
 
     Camera _cam;
 
+    uvec2 _initSz;
     Vector2 _winSz, _baseWinSz;
     float _time, _lastReszTime;
     Shader _shader;
@@ -114,5 +115,5 @@ struct Renderer {
     void _input();
     void startRender();
 
-    Renderer(World& w);
+    Renderer(World& w, uvec2 sz);
 };

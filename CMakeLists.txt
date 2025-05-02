@@ -42,22 +42,25 @@ if (NOT raylib_FOUND)
           set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE) # don't build the supplied examples
       endif()
 endif()
-
-find_package(Eigen3 CONFIG REQUIRED)
-if (NOT Eigen3_FOUND)
-    include(FetchContent)
-    FetchContent_Declare(
-        Eigen3
-        DOWNLOAD_EXTRACT_TIMESTAMP OFF
-        URL https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz
-    )
-    FetchContent_GetProperties(Eigen3)
-    if (NOT Eigen3_POPULATED)
-        FetchContent_MakeAvailable(Eigen3)
-    endif()
-endif()
-target_link_libraries(TRIVOX PUBLIC Eigen3::Eigen)
-
 target_compile_options(raylib PUBLIC -DRAYMATH_DISABLE_CPP_OPERATORS)
 target_compile_options(raylib PUBLIC -DGRAPHICS_API_OPENGL_43)
 target_link_libraries(TRIVOX PUBLIC raylib)
+
+find_package(Eigen3 CONFIG QUIET)
+if (NOT Eigen3_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(
+        Eigen
+        GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
+        GIT_TAG master
+        GIT_SHALLOW TRUE
+        GIT_PROGRESS TRUE)
+    set(BUILD_TESTING OFF)
+    set(EIGEN_BUILD_TESTING OFF)
+    set(EIGEN_MPL2_ONLY ON)
+    set(EIGEN_BUILD_PKGCONFIG OFF)
+    set(EIGEN_BUILD_DOC OFF)
+    FetchContent_MakeAvailable(Eigen)
+    list(POP_BACK CMAKE_MESSAGE_INDENT)
+endif()
+target_link_libraries(TRIVOX PRIVATE Eigen3::Eigen)

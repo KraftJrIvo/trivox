@@ -13,14 +13,16 @@ World::World() :
     rooms(TRIVOX_MAX_ROOMS),
     roomRefs(TRIVOX_MAX_ROOMS)
 { 
-    auto rid = addRoom(Room(vec3{10, 10, 10}));
-    addRoomRef(rid, mat4::Identity());
+    auto rid = addRoom(Room(vec3{8, 8, 8}));
     mat4 mat = mat4::Identity();
+    mat.TRAVEC += vec3{0, 0, 0};
+    addRoomRef(rid, mat);
+    mat = mat4::Identity();
     mat.TRAVEC += vec3{20, 20, 20};
     addRoomRef(rid, mat);
     mat = mat4::Identity();
     mat.ROTMAT = Eigen::AngleAxisf(-PI/8.f, vec3{1.0f, 0.0f, 0}).matrix() * Eigen::AngleAxisf(PI/4.f, vec3{0, 1.0f, 0}).matrix();
-    mat.TRAVEC += vec3{10, 10, 0};
+    mat.TRAVEC += vec3{8, 0, 0};
     addRoomRef(rid, mat);
     roomRefs.at(0).color = vec3{1.0, 0, 0};
     roomRefs.at(1).color = vec3{1.0, 1.0, 0};

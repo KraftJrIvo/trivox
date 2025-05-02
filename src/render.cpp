@@ -4,9 +4,6 @@
 #include "rcamera.h"
 #include "rlgl.h"
 
-#define WIN_WIDTH 768
-#define WIN_HEIGHT 512
-
 #define SPEED 0.1f
 #define FAST_COEFF 5.0f
 #define RESIZE_CD 0.25f
@@ -32,19 +29,20 @@ void Renderer::_resetCamPos() {
     _cam.projection = CAMERA_PERSPECTIVE;
 }
 
-Renderer::Renderer(World& w) :
-    _w(w)
+Renderer::Renderer(World& w, uvec2 sz) :
+    _w(w),
+    _initSz(sz)
 { 
     // /SetTraceLogLevel(LOG_ERROR);
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(WIN_WIDTH, WIN_HEIGHT, "t r i v o x");
+    InitWindow(_initSz.x(), _initSz.y(), "t r i v o x");
     SetWindowIcon(LoadImageFromMemory(".png", res_icon, res_icon_len));
     _resetCamPos();
     SetTargetFPS(60);    
     SetExitKey(KEY_F4);
 
     _shader = LoadShaderFromMemory(nullptr, (const char*)res_raytrace_frag);
-    _winSz = Vector2{WIN_WIDTH, WIN_HEIGHT};
+    _winSz = Vector2{(float)_initSz.x(), (float)_initSz.y()};
     _baseWinSz = _winSz;
     _updateShaderSize();
 }
