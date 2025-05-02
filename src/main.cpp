@@ -1,11 +1,12 @@
-#include "types.hpp"
+#include "render.h"
 
 int main() {
 
-	World w;
+	WorldConfig cfg = {};
+	World::Ptr w = World::create(cfg);
 
-	Renderer r(w, {1920, 1080});
-	r.startRender();
+	Renderer::Ptr r = Renderer::create(w, {1920, 1080});
+	r->startRender();
 
 	return 0;
 }

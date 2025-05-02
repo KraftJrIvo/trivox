@@ -1,5 +1,4 @@
-#include "raylib.h"
-#include "types.hpp"
+#include "render.h"
 #include "raymath.h"
 #include "rcamera.h"
 #include "rlgl.h"
@@ -13,27 +12,31 @@ extern "C" const size_t        res_icon_len;
 
 extern "C" const unsigned char res_raytrace_frag[];
 
-void Renderer::_updateShaderSize() {
-    SetShaderValue(_shader, GetShaderLocation(_shader, "RESOLUTION"), &_winSz, SHADER_ATTRIB_VEC2);
-    Image imBlank = GenImageColor(_winSz.x, _winSz.y, BLANK);
-    _backTex = LoadRenderTexture(_winSz.x, _winSz.y);
-    _frontTex = LoadRenderTexture(_winSz.x, _winSz.y);
-    _lastReszTime = GetTime();
-}
+class RendererImpl : public Renderer
+{
+    World::Ptr _w;
+    Camera _cam;
+    uvec2 _initSz;
+    Vector2 _winSz, _baseWinSz;
+    float _time, _lastReszTime;
+    Shader _shader;
+    RenderTexture2D _backTex, _frontTex;
+    bool _drawGrids = true;
+    
+    void _resetCamPos();
+    void _updateShaderSize();
+    void _input();
+    void _drawRoomGrids(Vector3 campos, bool front = false);
+public:
+    RendererImpl(World::Ptr w, uvec2 sz);
+    virtual void startRender() override;
+};
 
-void Renderer::_resetCamPos() {
-    _cam.position = { 0.0f, 2.0f, -8.0f };
-    _cam.target = { 0.0f, 0.0f, 1.0f };
-    _cam.up = { 0.0f, 1.0f, 0.0f };
-    _cam.fovy = 90.0f;      
-    _cam.projection = CAMERA_PERSPECTIVE;
-}
-
-Renderer::Renderer(World& w, uvec2 sz) :
+RendererImpl::RendererImpl(World::Ptr w, uvec2 sz) :
     _w(w),
     _initSz(sz)
 { 
-    // /SetTraceLogLevel(LOG_ERROR);
+    SetTraceLogLevel(LOG_ERROR);
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(_initSz.x(), _initSz.y(), "t r i v o x");
     SetWindowIcon(LoadImageFromMemory(".png", res_icon, res_icon_len));
@@ -47,7 +50,23 @@ Renderer::Renderer(World& w, uvec2 sz) :
     _updateShaderSize();
 }
 
-void Renderer::_input() {
+void RendererImpl::_updateShaderSize() {
+    SetShaderValue(_shader, GetShaderLocation(_shader, "RESOLUTION"), &_winSz, SHADER_ATTRIB_VEC2);
+    Image imBlank = GenImageColor(_winSz.x, _winSz.y, BLANK);
+    _backTex = LoadRenderTexture(_winSz.x, _winSz.y);
+    _frontTex = LoadRenderTexture(_winSz.x, _winSz.y);
+    _lastReszTime = GetTime();
+}
+
+void RendererImpl::_resetCamPos() {
+    _cam.position = { 0.0f, 2.0f, -8.0f };
+    _cam.target = { 0.0f, 0.0f, 1.0f };
+    _cam.up = { 0.0f, 1.0f, 0.0f };
+    _cam.fovy = 90.0f;      
+    _cam.projection = CAMERA_PERSPECTIVE;
+}
+
+void RendererImpl::_input() {
 
     bool shift = IsKeyDown(KEY_LEFT_SHIFT);
     float speed = SPEED * (shift ? FAST_COEFF : 1.0f);
@@ -112,10 +131,59 @@ void Renderer::_input() {
     }
 }
 
-void Renderer::startRender()
+void drawRoomGrid(vec3 A, vec3 B, vec3 C, vec3 D, int n1, int n2, vec3 campos, bool front) {
+    auto center = A + (B - A) / 2 + (D - A) / 2;
+    auto tocam = (campos - center).normalized();
+    auto normal = ((B - A).cross((C - A))).normalized();
+    if (front == (normal.dot(tocam) > 0)) {
+        for (int i = 0; i <= n1; ++i) {
+            auto st1 = i * (D - A) / ((float)n1);
+            DrawLine3D(toray3(A + st1), toray3(B + st1), GRAY);
+        }
+        for (int i = 0; i <= n2; ++i) {
+            auto st2 = i * (B - A) / ((float)n2);
+            DrawLine3D(toray3(A + st2), toray3(D + st2), GRAY);
+        }
+    }
+}
+
+void RendererImpl::_drawRoomGrids(Vector3 campos, bool front) 
+{    
+    auto ecampos = fromray3(campos);
+
+    for (int i = 0; i < _w->_state.roomRefs.count(); ++i) {
+
+        auto& rr = _w->_state.roomRefs.at(i);
+        auto& room = _w->_state.rooms.at(_w->_state.roomRefs.at(i).idx - 1);
+        Room rrr = room;
+        
+        vec3 roomHalfSz = room.size * 0.5f;
+        mat4 roomMat = rr.matrix();
+        mat3 roomRot = roomMat.ROTMAT;
+        vec3 roomCenter = roomMat.TRAVEC + roomMat.ROTMAT * roomHalfSz;
+        
+        vec3 A = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{ 1, -1,  1}));
+        vec3 B = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{ 1, -1, -1}));
+        vec3 C = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{-1, -1,  1}));
+        vec3 D = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{-1, -1, -1}));
+        vec3 E = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{ 1,  1,  1}));
+        vec3 F = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{ 1,  1, -1}));
+        vec3 G = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{-1,  1,  1}));
+        vec3 H = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{-1,  1, -1}));
+        
+        drawRoomGrid(A, B, D, C, room.size.z(), room.size.x(), ecampos, front);
+        drawRoomGrid(F, B, A, E, room.size.y(), room.size.z(), ecampos, front);
+        drawRoomGrid(C, D, H, G, room.size.z(), room.size.y(), ecampos, front);
+        drawRoomGrid(B, F, H, D, room.size.y(), room.size.x(), ecampos, front);
+        drawRoomGrid(E, A, C, G, room.size.y(), room.size.x(), ecampos, front);
+        drawRoomGrid(G, H, F, E, room.size.z(), room.size.x(), ecampos, front);
+    }
+}
+
+void RendererImpl::startRender()
 {
-    auto ssboRooms = rlLoadShaderBuffer(_w.rooms.size(), _w.rooms.data(), RL_DYNAMIC_DRAW);
-    auto ssboRoomRefs = rlLoadShaderBuffer(_w.roomRefs.size(), _w.roomRefs.data(), RL_DYNAMIC_DRAW);
+    auto ssboRooms = rlLoadShaderBuffer(_w->_state.rooms.size(), _w->_state.rooms.data(), RL_DYNAMIC_DRAW);
+    auto ssboRoomRefs = rlLoadShaderBuffer(_w->_state.roomRefs.size(), _w->_state.roomRefs.data(), RL_DYNAMIC_DRAW);
     rlBindShaderBuffer(ssboRooms, 0);
     rlBindShaderBuffer(ssboRoomRefs, 1);
 
@@ -134,48 +202,38 @@ void Renderer::startRender()
             BeginTextureMode(_backTex);
                 ClearBackground(BLACK);
                 BeginMode3D(_cam);
-                    _w.drawRoomGrids(_cam.position);
+                    _drawRoomGrids(_cam.position);
                 EndMode3D();
             EndTextureMode();
 
             BeginTextureMode(_frontTex);
                 ClearBackground(BLACK);
                 BeginMode3D(_cam);
-                    _w.drawRoomGrids(_cam.position, true);
+                    _drawRoomGrids(_cam.position, true);
                 EndMode3D();
             EndTextureMode();
         }
 
-        rlUpdateShaderBuffer(ssboRooms, _w.rooms.data(), _w.rooms.size(), 0);
-        rlUpdateShaderBuffer(ssboRoomRefs, _w.roomRefs.data(), _w.roomRefs.size(), 0);
+        rlUpdateShaderBuffer(ssboRooms, _w->_state.rooms.data(), _w->_state.rooms.size(), 0);
+        rlUpdateShaderBuffer(ssboRoomRefs, _w->_state.roomRefs.data(), _w->_state.roomRefs.size(), 0);
 
         SetShaderValueMatrix(_shader, GetShaderLocation(_shader, "CAM_MVP"), mvp);
         SetShaderValue(_shader, GetShaderLocation(_shader, "CAM_FOV"), &_cam.fovy, SHADER_ATTRIB_FLOAT);
         SetShaderValue(_shader, GetShaderLocation(_shader, "CAM_POS"), &_cam.position, SHADER_ATTRIB_VEC3);
         SetShaderValue(_shader, GetShaderLocation(_shader, "TIME"), &_time, SHADER_ATTRIB_FLOAT);
 
-        //rlEnableShader(_shader.id);
-        //rlSetUniformSampler(GetShaderLocation(_shader, "texture1"), _frontTex.texture.id);
-        //rlDisableShader();
-
-
         BeginDrawing();
-            //std::cout << _w.rooms.size() << "\n";
-            //std::cout << _w.roomRefs.size() << "\n";
             BeginShaderMode(_shader);
                 rlEnableShader(_shader.id);
                 rlSetUniformSampler(GetShaderLocation(_shader, "texture1"), _frontTex.texture.id);
-                DrawTextureRec(_backTex.texture, Rectangle{ 0, 0, (float)_backTex.texture.width, (float)-_backTex.texture.height }, (Vector2) { 0, 0 }, WHITE);
-                //std::vector<u8> data(_w.roomRefs.size());
-                //rlReadShaderBuffer(ssboRoomRefs, data.data(), data.size(), 0);
-                //for (auto i = 0; i < data.size(); ++i) {
-                //    std::cout << (int)data[i] << " ";
-                //}
-                //std::cout << sizeof(RoomRef) << "\n";
-                //std::cout << "\n";
+                DrawTextureRec(_backTex.texture, Rectangle{ 0, 0, (float)_backTex.texture.width, (float)-_backTex.texture.height }, Vector2{ 0, 0 }, WHITE);
             EndShaderMode();
         EndDrawing();
 
         _input();
     }
+}
+
+Renderer::Ptr Renderer::create(World::Ptr w, uvec2 sz) {
+    return std::shared_ptr<Renderer>(new RendererImpl(w, sz));
 }
