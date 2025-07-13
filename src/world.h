@@ -1,23 +1,14 @@
-#include "types.hpp"
+#include "types.h"
 
 struct WorldState {
-    ObjArena<vec3>          vertices;
-    ObjArena<ShapeUV>       shUVs;
-    ObjArena<ShapeMaterial> shMaterials;
-    ObjArena<Shape>         shapes;
-    ObjArena<Cell>          cells;
-    ObjArena<Room>          rooms;
-    ObjArena<RoomRef>       roomRefs;
-
-    WorldState() :
-    vertices(TRIVOX_MAX_TOTAL_VERTS),
-    shUVs(TRIVOX_MAX_TOTAL_SHAPE_UVS),
-    shMaterials(TRIVOX_MAX_TOTAL_SHAPE_MATERIALS),
-    shapes(TRIVOX_MAX_TOTAL_SHAPES),
-    cells(TRIVOX_MAX_TOTAL_CELLS),
-    rooms(TRIVOX_MAX_ROOMS),
-    roomRefs(TRIVOX_MAX_ROOMS)
-    { }
+    WorldVertices       vertices;
+    WorldShapeUVs       shUVs;
+    WorldShapeMaterials shMaterials;
+    WorldShapes         shapes;
+    WorldCells          cells;
+    WorldRooms          rooms;
+    WorldRoomRefs       roomRefs;
+    WorldEntities       entities;
 };
 
 struct WorldConfig {
@@ -35,6 +26,8 @@ public:
     World(const WorldConfig& cfg) : 
         cfg(cfg)
     { }
+
+    virtual void update() = 0;
 
     using Ptr = std::shared_ptr<World>;
     static Ptr create(const WorldConfig& cfg);

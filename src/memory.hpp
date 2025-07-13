@@ -1,8 +1,54 @@
+#pragma once
+
 #include "base.h"
 #include <array>
 #include <cstddef>
 #include <limits>
 #include <vector>
+
+template <size_t CAP, typename T>
+class Arena 
+{
+    std::vector<T> _data;
+    size_t _firstAvailableIdx;
+
+public:
+    
+    Arena() :
+        _firstAvailableIdx(0)
+    {
+        _data.resize(CAP);
+    }
+
+    T* data() {
+        return _data.data();
+    }
+
+    size_t size() {
+        return CAP * sizeof(T);
+    }
+
+    size_t acquire(const T& obj, size_t count = 1) {
+        _data[_firstAvailableIdx] = obj;
+        return _firstAvailableIdx++;
+    }
+
+    T& at(size_t idx) {
+        return _data[idx];
+    }    
+
+    const T& get(size_t idx) const {
+        return _data[idx];
+    }
+
+    size_t count() const {return _firstAvailableIdx;}
+    size_t capacity() {return CAP;}
+
+    void clear() {
+        _firstAvailableIdx = 0;
+    }
+
+};
 
 template <typename T>
 class ObjArena 
@@ -18,16 +64,12 @@ class ObjArena
         auto newCap = _capacity + more;
         _data.resize(newCap);
         _counters.resize(newCap, 1);
-        //std::cout << newCap << ": ";
         for (u64 i = newCap - 1; i >= 0 && i < newCap; --i) {
             if (_counters[i] == 0)
                 break;
             else
                 _counters[i] += (i < _capacity) ? more : (more - i - 1);
         }
-        //for (u64 i = 0; i < newCap; ++i)
-        //    std::cout << _counters[i] << " ";
-
         if (_firstAvailableIdx >= _capacity)
             _firstAvailableIdx = _capacity;
         _capacity = newCap;

@@ -1,27 +1,29 @@
+#pragma once
+
 #include <array>
 #include <cstring>
 
 #include "base.h"
+#include "config.h"
 #include "memory.hpp"
+#include "pyramid.hpp"
 
 #include "raylib.h"
 
-#define TRIVOX_MAX_TOTAL_SHAPE_UVS       1024
-#define TRIVOX_MAX_TOTAL_SHAPE_MATERIALS 256
-#define TRIVOX_MAX_TOTAL_CELLS           65536
-#define TRIVOX_MAX_SHAPES_PER_ROOM       256
-#define TRIVOX_MAX_VERTS_PER_SHAPE       3
-#define TRIVOX_MAX_ROOMS                 16
-#define TRIVOX_MAX_TOTAL_SHAPES          TRIVOX_MAX_SHAPES_PER_ROOM * TRIVOX_MAX_ROOMS
-#define TRIVOX_MAX_TOTAL_VERTS           TRIVOX_MAX_VERTS_PER_SHAPE * TRIVOX_MAX_TOTAL_SHAPES
 
-enum ShapeType : u32 {
+enum class ShapeType : u32 {
     NONE,
     POINT,
     SPHERE,
-    SPRITE,
+    PLANE,
     LINE,
-    TRIANGLE
+    TRIANGLE,
+    QUAD
+};
+
+struct AABB {
+    vec3 min;
+    vec3 max;
 };
 
 // vec4 x 3 : rx ry rw rh | uv0x uv0y uv1x uv1y | uv2x uv2y null null
@@ -52,15 +54,9 @@ struct Shape {
     u32 materialIdx;
 };
 
-// uvec2 : shidx dist
-struct Cell {
-    u32 firstShapeIdx = 0;
-    u32 distance      = 0;
-};
-
 // size pad | cellsz pad | fcid
 struct Room {
-    vec3 size       = {0, 0, 0};
+    vec3 size = {0, 0, 0};
     u32 firstCellIdx = 0;
     Room() = default;
     Room(vec3 size, u32 firstCellIdx = 0) : size(size), firstCellIdx(firstCellIdx) {}
@@ -73,9 +69,29 @@ struct RoomRef {
     u32 idx;
     RoomRef() = default;
     RoomRef(u32 idx, const mat4& mat) : idx(idx + 1), _matrix(mat) { }
-    mat4 matrix() {
+    mat4 matrix() const {
         mat4 res;
         memcpy(res.data(), &_matrix, sizeof(mat));
         return res;
     }
 };
+
+template <u8 MIN_LVL, u8 MAX_LVL>
+struct EntityT {
+    std::array<u8, MAX_LVL-MIN_LVL> nShapes;
+    std::array<u32, MAX_LVL-MIN_LVL> firstShapeIdx;
+
+    //virtual void update(float delta) = 0;
+};
+typedef EntityT<TRIVOX_MIN_LVL, TRIVOX_MAX_LVL> Entity;
+
+
+typedef Arena<TRIVOX_MAX_TOTAL_VERTS, vec3>                    WorldVertices;
+typedef Arena<TRIVOX_MAX_TOTAL_SHAPE_UVS, ShapeUV>             WorldShapeUVs;
+typedef Arena<TRIVOX_MAX_TOTAL_SHAPE_MATERIALS, ShapeMaterial> WorldShapeMaterials;
+typedef Arena<TRIVOX_MAX_TOTAL_SHAPES, Shape>                  WorldShapes;
+typedef Arena<TRIVOX_MAX_ROOMS, Room>                          WorldRooms;
+typedef Arena<TRIVOX_MAX_ROOMS, RoomRef>                       WorldRoomRefs;
+typedef Arena<TRIVOX_MAX_ENTITIES, Entity>                     WorldEntities;
+
+typedef CellPyramid<TRIVOX_MAX_ROOMS, TRIVOX_MIN_LVL, TRIVOX_MAX_LVL> WorldCells;

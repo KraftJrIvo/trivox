@@ -22,9 +22,9 @@ typedef double f64;
 typedef float  f32;
 typedef short  f16;
 
-typedef Eigen::Vector2f                vec2;
-typedef Eigen::Vector3f                vec3;
-typedef Eigen::Vector4f                vec4;
+typedef Eigen::Vector2f                   vec2;
+typedef Eigen::Vector3f                   vec3;
+typedef Eigen::Vector4f                   vec4;
 typedef Eigen::Matrix<unsigned int, 2, 1> uvec2;
 typedef Eigen::Matrix<unsigned int, 3, 1> uvec3;
 typedef Eigen::Matrix<unsigned int, 4, 1> uvec4;
@@ -69,4 +69,4 @@ struct mat {
 typedef Eigen::Quaternionf quat;
 
 #define ROTMAT block<3,3>(0,0)
-#define TRAVEC block<3,1>(0,3)
+#define POSVEC block<3,1>(0,3)

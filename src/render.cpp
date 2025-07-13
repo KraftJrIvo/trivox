@@ -160,7 +160,7 @@ void RendererImpl::_drawRoomGrids(Vector3 campos, bool front)
         vec3 roomHalfSz = room.size * 0.5f;
         mat4 roomMat = rr.matrix();
         mat3 roomRot = roomMat.ROTMAT;
-        vec3 roomCenter = roomMat.TRAVEC + roomMat.ROTMAT * roomHalfSz;
+        vec3 roomCenter = roomMat.POSVEC + roomMat.ROTMAT * roomHalfSz;
         
         vec3 A = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{ 1, -1,  1}));
         vec3 B = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{ 1, -1, -1}));
@@ -171,12 +171,12 @@ void RendererImpl::_drawRoomGrids(Vector3 campos, bool front)
         vec3 G = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{-1,  1,  1}));
         vec3 H = roomCenter + roomRot * (-roomHalfSz.cwiseProduct(vec3{-1,  1, -1}));
         
-        drawRoomGrid(A, B, D, C, room.size.z(), room.size.x(), ecampos, front);
-        drawRoomGrid(F, B, A, E, room.size.y(), room.size.z(), ecampos, front);
-        drawRoomGrid(C, D, H, G, room.size.z(), room.size.y(), ecampos, front);
-        drawRoomGrid(B, F, H, D, room.size.y(), room.size.x(), ecampos, front);
-        drawRoomGrid(E, A, C, G, room.size.y(), room.size.x(), ecampos, front);
-        drawRoomGrid(G, H, F, E, room.size.z(), room.size.x(), ecampos, front);
+        drawRoomGrid(A, B, D, C, room.size.x(), room.size.z(), ecampos, front);
+        drawRoomGrid(F, B, A, E, room.size.z(), room.size.y(), ecampos, front);
+        drawRoomGrid(C, D, H, G, room.size.y(), room.size.z(), ecampos, front);
+        drawRoomGrid(B, F, H, D, room.size.x(), room.size.y(), ecampos, front);
+        drawRoomGrid(E, A, C, G, room.size.x(), room.size.y(), ecampos, front);
+        drawRoomGrid(G, H, F, E, room.size.x(), room.size.z(), ecampos, front);
     }
 }
 

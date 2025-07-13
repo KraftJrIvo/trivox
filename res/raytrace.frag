@@ -245,7 +245,7 @@ Intersection raytrace_rooms(Ray ray)
             if ((rr.idx == 0) || (!first && lastRridx == i))
                 continue;
 
-            Room r = rooms_data[0];
+            Room r = rooms_data[rr.idx - 1];
             Box box = Box(rr.mat[3].xyz, mat3(rr.mat), r.sz);
             Intersection inter = raytrace_box(ray, box);
 

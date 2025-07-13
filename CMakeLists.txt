@@ -13,8 +13,9 @@ add_custom_command(OUTPUT res_raytrace_frag.c COMMAND embedfile res_raytrace_fra
 
 set(TRIVOX_SOURCE_FILES
     "src/memory.hpp"
-    "src/types.hpp"
+    "src/pyramid.hpp"
     "src/world.cpp"
+    "src/shape.cpp"
     "src/render.cpp"
     "src/main.cpp"
     res_icon.c
@@ -29,6 +30,7 @@ set(RAYLIB_VERSION 5.5)
 find_package(raylib ${RAYLIB_VERSION} QUIET)
 if (NOT raylib_FOUND)
     include(FetchContent)
+    set(CMAKE_TLS_VERIFY FALSE)
     FetchContent_Declare(
         raylib
         DOWNLOAD_EXTRACT_TIMESTAMP OFF
@@ -49,6 +51,7 @@ target_link_libraries(TRIVOX PUBLIC raylib)
 find_package(Eigen3 CONFIG QUIET)
 if (NOT Eigen3_FOUND)
     include(FetchContent)
+    set(CMAKE_TLS_VERIFY FALSE)
     FetchContent_Declare(
         Eigen
         GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
