@@ -76,7 +76,9 @@ void shapeFillRoomIfInside(u8 lvl, const Shape& shape, u32 sid, const WorldVerti
             for (u32 y = startCell.y(); y <= endCell.y(); ++y) {
                 for (u32 z = startCell.z(); z <= endCell.z(); ++z) {
                     //AABB caabb = AABB{vec3{(float)x, (float)y, (float)z}, vec3{x + csz, y + csz, z + csz}};
-                    cells.at(rr.idx, lvl, {x, y, z}).addShape(sid);
+                    auto& cell = cells.at(rr.idx, lvl, {x, y, z});
+                    cell.addShape(sid);
+                    cell.distance = 1;
                 }
             }
         }

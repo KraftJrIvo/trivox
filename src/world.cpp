@@ -6,6 +6,7 @@ class WorldImpl : public World {
     u64 _addRoomRef(u64 rid, const mat4& matrix);
     u64 _addEntity(const Entity& ent);
     void _fillCells();
+    void _fillCellDistances();
     void _fillCellsWithEntity(u8 lvl, u8 eid);
     void _fillCellsWithShape(u8 lvl, u32 sid);
 public:
@@ -50,7 +51,7 @@ void WorldImpl::_fillCells() {
 void WorldImpl::_fillCellsWithEntity(u8 lvl, u8 eid) {
     auto& ent = _state.entities.at(eid);
     for (u32 sid = ent.firstShapeIdx[lvl]; sid < ent.firstShapeIdx[lvl] + ent.nShapes[lvl]; ++sid)
-        _fillCellsWithShape(lvl, sid);
+    _fillCellsWithShape(lvl, sid);
 }
 
 void WorldImpl::_fillCellsWithShape(u8 lvl, u32 sid) {
@@ -62,8 +63,15 @@ void WorldImpl::_fillCellsWithShape(u8 lvl, u32 sid) {
     }
 }
 
+void WorldImpl::_fillCellDistances() {
+    for (u8 i = 0; i < _state.rooms.count(); ++i)
+       _state.cells.fillDistances(i);
+}
+
 void WorldImpl::update() {
+    _state.cells.clear();
     _fillCells();
+    _fillCellDistances();
 }
 
 World::Ptr World::create(const WorldConfig& cfg) {
