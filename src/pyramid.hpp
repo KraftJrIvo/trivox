@@ -44,7 +44,7 @@ public:
     }
 
     void _trySetDistFromCell(u8 rid, u8 lvl, u32 ncells, Cell& curcell, const uvec3& otherPos) {
-        if (otherPos.x() >= 0 && otherPos.x() < ncells && otherPos.y() > 0 && otherPos.y() < ncells && otherPos.z() > 0 && otherPos.z() < ncells) {
+        if (otherPos.x() >= 0 && otherPos.x() < ncells && otherPos.y() >= 0 && otherPos.y() < ncells && otherPos.z() >= 0 && otherPos.z() < ncells) {
             auto otherCell = at(rid, lvl, otherPos);
             if (otherCell.distance > 0) {
                 curcell.distance = otherCell.distance + 1;
