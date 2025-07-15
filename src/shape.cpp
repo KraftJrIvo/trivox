@@ -58,33 +58,6 @@ AABB shapeGetAABB(const ShapeType& type, const std::array<vec3, 3>& vs)
     }
 }
 
-void shapeFillRoomIfInside(u8 lvl, const Shape& shape, u32 sid, const WorldVertices& vertices, const RoomRef& rr, const Room& r, WorldCells& cells) 
-{
-    mat4 matrix = rr.matrix();
-    vec3 r0 = matrix.POSVEC;
-    std::array<vec3, 3> vs;
-    auto vnum = shapeGetVnum(shape.type);
-    for (int i = 0; i < vnum; ++i)
-        vs[i] = matrix.ROTMAT * (vertices.get(shape.vIds[i]) - r0);
-    AABB raabb = AABB{vec3{0, 0, 0}, r.size};
-    if (shapeCollidesAABB(shape.type, raabb, vs)) {
-        AABB saabb = shapeGetAABB(shape.type, vs);
-        float csz = 1 << (cells.MAX_LVL - lvl);
-        uvec3 startCell = {(u32)floor((saabb.min.x() / csz)), (u32)floor((saabb.min.y() / csz)), (u32)floor((saabb.min.z() / csz))};
-        uvec3 endCell = {(u32)floor((saabb.max.x() / csz)), (u32)floor((saabb.max.y() / csz)), (u32)floor((saabb.max.z() / csz))};
-        for (u32 x = startCell.x(); x <= endCell.x(); ++x) {
-            for (u32 y = startCell.y(); y <= endCell.y(); ++y) {
-                for (u32 z = startCell.z(); z <= endCell.z(); ++z) {
-                    //AABB caabb = AABB{vec3{(float)x, (float)y, (float)z}, vec3{x + csz, y + csz, z + csz}};
-                    auto& cell = cells.at(rr.idx, lvl, {x, y, z});
-                    cell.addShape(sid);
-                    cell.distance = 1;
-                }
-            }
-        }
-    }
-}
-
 bool shapeCollidesAABB(const ShapeType& type, const AABB& aabb, const std::array<vec3, 3>& vs) {
     switch (type) {
     case ShapeType::POINT: {

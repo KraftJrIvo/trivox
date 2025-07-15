@@ -7,10 +7,11 @@
 
 struct Cell {
     u32 distance = 0;
-    Arena<TRIVOX_MAX_SHAPES_PER_ROOM, u32> shIds;
+    u32 nShapes = 0;
+    u32 shids[TRIVOX_MAX_SHAPES_PER_ROOM];
 
-    void addShape(u32 shId) {
-        shIds.acquire(shId);
+    void addShape(u32 shid) {
+        shids[nShapes++] = shid;
     }
 };
 

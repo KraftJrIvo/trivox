@@ -182,10 +182,14 @@ void RendererImpl::_drawRoomGrids(Vector3 campos, bool front)
 
 void RendererImpl::startRender()
 {
+    auto ssboVerts = rlLoadShaderBuffer(_w->_state.vertices.size(), _w->_state.vertices.data(), RL_DYNAMIC_DRAW);
+    auto ssboShapes = rlLoadShaderBuffer(_w->_state.shapes.size(), _w->_state.shapes.data(), RL_DYNAMIC_DRAW);
     auto ssboRooms = rlLoadShaderBuffer(_w->_state.rooms.size(), _w->_state.rooms.data(), RL_DYNAMIC_DRAW);
     auto ssboRoomRefs = rlLoadShaderBuffer(_w->_state.roomRefs.size(), _w->_state.roomRefs.data(), RL_DYNAMIC_DRAW);
-    rlBindShaderBuffer(ssboRooms, 0);
-    rlBindShaderBuffer(ssboRoomRefs, 1);
+    rlBindShaderBuffer(ssboVerts, 0);
+    rlBindShaderBuffer(ssboShapes, 1);
+    rlBindShaderBuffer(ssboRooms, 2);
+    rlBindShaderBuffer(ssboRoomRefs, 3);
 
     while (!WindowShouldClose()) 
     {
@@ -214,6 +218,8 @@ void RendererImpl::startRender()
             EndTextureMode();
         }
 
+        rlUpdateShaderBuffer(ssboVerts, _w->_state.vertices.data(), _w->_state.vertices.size(), 0);
+        rlUpdateShaderBuffer(ssboShapes, _w->_state.shapes.data(), _w->_state.shapes.size(), 0);
         rlUpdateShaderBuffer(ssboRooms, _w->_state.rooms.data(), _w->_state.rooms.size(), 0);
         rlUpdateShaderBuffer(ssboRoomRefs, _w->_state.roomRefs.data(), _w->_state.roomRefs.size(), 0);
 

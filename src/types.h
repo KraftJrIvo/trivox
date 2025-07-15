@@ -50,7 +50,7 @@ struct ShapeMaterial {
 struct Shape {
     ShapeType type;
     u32 vIds[TRIVOX_MAX_VERTS_PER_SHAPE];
-    Color color;
+    vec3 color;
     u32 materialIdx;
 };
 
@@ -75,23 +75,3 @@ struct RoomRef {
         return res;
     }
 };
-
-template <u8 MIN_LVL, u8 MAX_LVL>
-struct EntityT {
-    std::array<u8, MAX_LVL-MIN_LVL> nShapes;
-    std::array<u32, MAX_LVL-MIN_LVL> firstShapeIdx;
-
-    //virtual void update(float delta) = 0;
-};
-typedef EntityT<TRIVOX_MIN_LVL, TRIVOX_MAX_LVL> Entity;
-
-
-typedef Arena<TRIVOX_MAX_TOTAL_VERTS, vec3>                    WorldVertices;
-typedef Arena<TRIVOX_MAX_TOTAL_SHAPE_UVS, ShapeUV>             WorldShapeUVs;
-typedef Arena<TRIVOX_MAX_TOTAL_SHAPE_MATERIALS, ShapeMaterial> WorldShapeMaterials;
-typedef Arena<TRIVOX_MAX_TOTAL_SHAPES, Shape>                  WorldShapes;
-typedef Arena<TRIVOX_MAX_ROOMS, Room>                          WorldRooms;
-typedef Arena<TRIVOX_MAX_ROOMS, RoomRef>                       WorldRoomRefs;
-typedef Arena<TRIVOX_MAX_ENTITIES, Entity>                     WorldEntities;
-
-typedef CellPyramid<TRIVOX_MAX_ROOMS, TRIVOX_MIN_LVL, TRIVOX_MAX_LVL> WorldCells;

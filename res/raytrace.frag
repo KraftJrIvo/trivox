@@ -26,15 +26,36 @@ struct RoomRef {
     uint idx;
 };
 
+struct Shape {
+    uint type;
+    uint vid0;
+    uint vid1;
+    uint vid2;
+    vec3 col;
+    uint matIdx;
+};
+
+
 layout(std140, binding = 0) 
+buffer Vertices
+{
+    vec3 verts_data[];
+};
+layout(std140, binding = 1) 
+buffer Shapes
+{
+    Shape shapes_data[];
+};
+layout(std140, binding = 2) 
 buffer Rooms
 {
     Room rooms_data[];
 };
-layout (std140, binding = 1) 
+layout (std140, binding = 3) 
 buffer RoomRefs {
     RoomRef roomrefs_data[];
 };
+
 
 uniform vec2 RESOLUTION;
 uniform float TIME;
@@ -46,9 +67,11 @@ uniform vec3 CAM_POS;
 uniform sampler2D texture0;
 uniform sampler2D texture1;
 
+
 struct Sphere {
     vec3 o;
     float r;
+    vec3 col;
 };
 
 struct Box {
@@ -91,7 +114,7 @@ Intersection raytrace_sphere(Ray ray, Sphere sphere) {
             result.exists = true;
             result.o = ray.o + t * ray.dir;
             result.n = normalize(result.o - sphere.o);
-            result.col = result.n;
+            result.col = sphere.col * dot(vec3(0., -1., 0.), result.n);//result.n;
         }
     }
     
@@ -203,7 +226,7 @@ Intersection raytrace_room(Ray ray, RoomRef rr, Box box) {
         //float csz = pow(2, lvl);
 
         AAC aac = AAC(floor(lray.o / csz) * csz, csz);
-        Sphere sph = Sphere(aac.o + vec3(csz * .5), csz * .45);
+        Sphere sph = Sphere(aac.o + vec3(csz * .5), csz * .45, vec3(1.));
         res = raytrace_sphere(lray, sph);
         if (res.exists) {
             res.o = box.rot * res.o + box.o;
@@ -287,7 +310,7 @@ Intersection raytrace_rooms(Ray ray)
     if (!hit)
         path = FOG_DIST;
 
-    closest.col = mix(.5 * (closest.n + 1.), FOG_COLOR, clamp(path / FOG_DIST, .001, 1.));
+    closest.col = mix(.5 * (closest.col + 1.), FOG_COLOR, clamp(path / FOG_DIST, .001, 1.));
 
     return closest;
 }
