@@ -1,7 +1,7 @@
 #include "types.h"
 #include "entity.hpp"
 
-typedef Arena<TRIVOX_MAX_TOTAL_VERTS, vec3>                    WorldVertices;
+typedef Arena<TRIVOX_MAX_TOTAL_VERTS, Vertex>                  WorldVertices;
 typedef Arena<TRIVOX_MAX_TOTAL_SHAPE_UVS, ShapeUV>             WorldShapeUVs;
 typedef Arena<TRIVOX_MAX_TOTAL_SHAPE_MATERIALS, ShapeMaterial> WorldShapeMaterials;
 typedef Arena<TRIVOX_MAX_TOTAL_SHAPES, Shape>                  WorldShapes;
@@ -38,7 +38,7 @@ public:
         cfg(cfg)
     { }
 
-    virtual void update() = 0;
+    virtual void update(float delta) = 0;
 
     using Ptr = std::shared_ptr<World>;
     static Ptr create(const WorldConfig& cfg);

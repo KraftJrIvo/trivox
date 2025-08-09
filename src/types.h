@@ -26,6 +26,11 @@ struct AABB {
     vec3 max;
 };
 
+struct Vertex {
+    vec3 v;
+    float _null;
+};
+
 // vec4 x 3 : rx ry rw rh | uv0x uv0y uv1x uv1y | uv2x uv2y null null
 struct ShapeUV {
     Rectangle atlasRect;

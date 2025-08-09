@@ -35,6 +35,12 @@ struct Shape {
     uint matIdx;
 };
 
+struct Cell {
+    uvec4 shids[64];
+    uint dist;
+    uint nShapes;
+};
+
 
 layout(std140, binding = 0) 
 buffer Vertices
@@ -54,6 +60,10 @@ buffer Rooms
 layout (std140, binding = 3) 
 buffer RoomRefs {
     RoomRef roomrefs_data[];
+};
+layout (std140, binding = 4) 
+buffer Cells {
+    Cell cells_data[];
 };
 
 
@@ -98,6 +108,19 @@ struct Intersection {
     Ray exit;
 };
 
+
+
+Cell cell_at(uint room, uint lvl, vec3 pos) {
+    float ncells = 1 << lvl;
+    float cellsz = pow(2,float(MAX_LVL)) / ncells;
+    vec3 ipos = floor(pos / cellsz);
+    uint roomsz = (1 << (MIN_LVL * 3)) * ((1 << ((MAX_LVL - MIN_LVL + 1) * 3)) - 1) / (8 - 1);
+    uint roomoff = roomsz * room;
+    uint lvloff = uint(pow(8, MIN_LVL) * (pow(8, (lvl - 1) - MIN_LVL + 1) - 1) / (8 - 1));
+    uint celloff = uint(ncells * ncells * ipos.z + ncells * ipos.y + ipos.x);
+    return cells_data[roomoff + lvloff + celloff];
+}
+
 Intersection raytrace_sphere(Ray ray, Sphere sphere) {
     vec3 oc = ray.o - sphere.o;
     float a = dot(ray.dir, ray.dir);
@@ -114,7 +137,11 @@ Intersection raytrace_sphere(Ray ray, Sphere sphere) {
             result.exists = true;
             result.o = ray.o + t * ray.dir;
             result.n = normalize(result.o - sphere.o);
-            result.col = sphere.col * dot(vec3(0., -1., 0.), result.n);//result.n;
+            vec3 lightdir = normalize(vec3(4., 4., 4.) - result.o);
+            vec3 amb = vec3(.1) * sphere.col;
+            vec3 dif = sphere.col * max(dot(lightdir, result.n), 0.);
+            vec3 spc = vec3(pow(max(0., dot(reflect(-lightdir, result.n), -ray.dir)), 50.)) * .33;
+            result.col = amb + dif + spc;
         }
     }
     
@@ -220,19 +247,42 @@ Intersection raytrace_room(Ray ray, RoomRef rr, Box box) {
             }
         }
 
-        //vec3 cellc = floor(lray.o) + vec3(.5);
-        //float vsz = (2. * atan(1. / length(cellc - lcampos))) * RESOLUTION.y;
-        //float lvl = clamp(floor(log2(MIN_VSZ / vsz)), 0., 3.);
-        //float csz = pow(2, lvl);
+        Cell cell = cell_at(rr.idx - 1, uint(MAX_LVL - lvl), lray.o);
 
         AAC aac = AAC(floor(lray.o / csz) * csz, csz);
-        Sphere sph = Sphere(aac.o + vec3(csz * .5), csz * .45, vec3(1.));
-        res = raytrace_sphere(lray, sph);
+        res = raytrace_aac(lray, aac);
+        res.exists = false;
+
+        if (cell.dist == 1) {
+            Intersection bestres = res;
+            bestres.exists = false;
+            float besdist = length(res.exit.o - lray.o) + EPS;
+            for (int i = 0; i < cell.nShapes; ++i) {
+                Shape shape = shapes_data[cell.shids[i / 4][i % 4]];
+                vec3 center = verts_data[shape.vid0];
+                vec3 params = verts_data[shape.vid1];
+                Sphere sph = Sphere(center, params[0], shape.col);
+                res = raytrace_sphere(lray, sph);
+                float dist = length(res.o - lray.o);
+                if (res.exists && dist < besdist) {
+                    bestres = res;
+                    besdist = dist;
+                }
+            }
+            res = bestres;
+
+            //AAC aac = AAC(floor(lray.o / csz) * csz, csz);
+            //Sphere sph = Sphere(aac.o + vec3(csz * .5), csz * .15 * cell.nShapes, vec3(1.));
+            //Intersection res2 = raytrace_sphere(lray, sph);
+            //if (length(res2.o - lray.o) < besdist) {
+            //    res = res2;
+            //}
+        }
+
         if (res.exists) {
             res.o = box.rot * res.o + box.o;
             return res;
-        } else {
-            res = raytrace_aac(lray, aac);
+        } else {            
             lray.o = res.exit.o + res.exit.dir * EPS;
             inside = all(greaterThanEqual(lray.o, vec3(0.))) && all(lessThanEqual(lray.o, box.sz));
             res.exists = false;
@@ -310,7 +360,7 @@ Intersection raytrace_rooms(Ray ray)
     if (!hit)
         path = FOG_DIST;
 
-    closest.col = mix(.5 * (closest.col + 1.), FOG_COLOR, clamp(path / FOG_DIST, .001, 1.));
+    closest.col = mix(closest.col + EPS, FOG_COLOR, clamp(path / FOG_DIST, .001, 1.));
 
     return closest;
 }

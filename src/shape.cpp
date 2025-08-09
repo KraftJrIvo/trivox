@@ -3,6 +3,7 @@
 int shapeGetVnum(ShapeType type) {
     switch (type) {
     case ShapeType::POINT:
+        return 1;
     case ShapeType::SPHERE:
         return 1;
     case ShapeType::PLANE:
@@ -11,6 +12,20 @@ int shapeGetVnum(ShapeType type) {
     case ShapeType::TRIANGLE:
     case ShapeType::QUAD:
         return 3;
+    default:
+        return 0;
+    }
+}
+
+int shapeGetPnum(ShapeType type) {
+    switch (type) {
+    case ShapeType::POINT:
+    case ShapeType::SPHERE:
+        return 1;
+    case ShapeType::PLANE:
+    case ShapeType::LINE:
+    case ShapeType::TRIANGLE:
+    case ShapeType::QUAD:
     default:
         return 0;
     }

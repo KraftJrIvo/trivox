@@ -70,3 +70,6 @@ typedef Eigen::Quaternionf quat;
 
 #define ROTMAT block<3,3>(0,0)
 #define POSVEC block<3,1>(0,3)
+
+#define RAND_FLOAT static_cast <float> (rand()) / (static_cast <float> (RAND_MAX) + 1.0f)
+#define RAND_FLOAT_SIGNED (2.0f * RAND_FLOAT - 1.0f)
