@@ -114,7 +114,7 @@ class WorldImpl : public World {
             _state.roomRefs.at(1).color = vec3{1.0, 1.0, 0};
             _state.roomRefs.at(2).color = vec3{0, 0, 1.0};
             
-            for (int i = 0; i < 25; ++i)
+            for (int i = 0; i < 100; ++i)
                 auto eid = _addEntity(rrid0, EntityType::BOUNCE_BALL, {RAND_FLOAT * 6 + 1, RAND_FLOAT * 6 + 1, RAND_FLOAT * 6 + 1});                
         }
         

@@ -38,7 +38,7 @@ RendererImpl::RendererImpl(World::Ptr w, uvec2 sz) : _w(w), _initSz(sz) {
     InitWindow(_initSz.x(), _initSz.y(), "t r i v o x");
     SetWindowIcon(LoadImageFromMemory(".png", res_icon, res_icon_len));
     _resetCamPos();
-    SetTargetFPS(60);
+    SetTargetFPS(120);
     SetExitKey(KEY_F4);
 
     _shader = LoadShaderFromMemory(nullptr, (const char *)res_raytrace_frag);
@@ -251,6 +251,7 @@ void RendererImpl::startRender() {
                        Rectangle{0, 0, (float)_backTex.texture.width, (float)-_backTex.texture.height},
                        Vector2{0, 0}, WHITE);
         EndShaderMode();
+        DrawText(std::to_string(GetFPS()).c_str(), 10, 10, 10, RED);
         EndDrawing();
 
         _input();

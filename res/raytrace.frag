@@ -172,7 +172,6 @@ Intersection raytrace_box(Ray ray, Box box) {
         else if (abs(localPos.z) < epsilon) locn.z = -1.;
         else if (abs(localPos.z - box.sz.z) < epsilon) locn.z = 1.;
         result.n = box.rot * locn;
-        //result.col = localPos * .1;
         vec3 localExit = lray.o + lray.dir * tFar;
         result.exit = Ray(box.rot * localExit + box.o, ray.dir);
         if (inside)
@@ -222,6 +221,10 @@ vec3 minIndicator(vec3 v) {
     );
 }
 
+float minval3(vec3 v) {
+    return min(v.x, min(v.y, v.z));
+}
+
 Intersection raytrace_room(Ray ray, RoomRef rr, Box box) {
     Intersection res;
     res.exists = false;
@@ -246,17 +249,26 @@ Intersection raytrace_room(Ray ray, RoomRef rr, Box box) {
                 break;
             }
         }
+        float ncells = pow(2, MAX_LVL) / csz;
 
         Cell cell = cell_at(rr.idx - 1, uint(MAX_LVL - lvl), lray.o);
 
-        AAC aac = AAC(floor(lray.o / csz) * csz, csz);
+        //AAC aac = AAC(floor(lray.o / csz) * csz, csz);
+
+        vec3 curcell = floor(lray.o / csz);
+        int celrad = max(int(cell.dist) - 1, 0);
+        vec3 startC = clamp(vec3(curcell - celrad), vec3(0.), vec3(ncells - 1.));
+        vec3 endC = clamp(vec3(curcell + celrad), vec3(0.), vec3(ncells - 1.));
+        AAC aac = AAC(startC * csz, minval3(endC - startC + 1) * csz);
+
         res = raytrace_aac(lray, aac);
         res.exists = false;
 
-        if (cell.dist == 1) {
-            Intersection bestres = res;
-            bestres.exists = false;
-            float besdist = length(res.exit.o - lray.o) + EPS;
+        Intersection bestres = res;
+        bestres.exists = false;
+        float besdist = length(res.exit.o - lray.o) + EPS;
+
+        if (cell.dist == 0) {
             for (int i = 0; i < cell.nShapes; ++i) {
                 Shape shape = shapes_data[cell.shids[i / 4][i % 4]];
                 vec3 center = verts_data[shape.vid0];
@@ -270,13 +282,6 @@ Intersection raytrace_room(Ray ray, RoomRef rr, Box box) {
                 }
             }
             res = bestres;
-
-            //AAC aac = AAC(floor(lray.o / csz) * csz, csz);
-            //Sphere sph = Sphere(aac.o + vec3(csz * .5), csz * .15 * cell.nShapes, vec3(1.));
-            //Intersection res2 = raytrace_sphere(lray, sph);
-            //if (length(res2.o - lray.o) < besdist) {
-            //    res = res2;
-            //}
         }
 
         if (res.exists) {
@@ -284,7 +289,7 @@ Intersection raytrace_room(Ray ray, RoomRef rr, Box box) {
             return res;
         } else {            
             lray.o = res.exit.o + res.exit.dir * EPS;
-            inside = all(greaterThanEqual(lray.o, vec3(0.))) && all(lessThanEqual(lray.o, box.sz));
+            inside = all(greaterThanEqual(lray.o, vec3(0.))) && all(lessThan(lray.o, box.sz));
             res.exists = false;
         }
     }
