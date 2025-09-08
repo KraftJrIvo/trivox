@@ -225,17 +225,15 @@ float minval3(vec3 v) {
     return min(v.x, min(v.y, v.z));
 }
 
-Intersection raytrace_room(Ray ray, RoomRef rr, Box box) {
+Intersection raytrace_room(uint rid, Ray lray, vec3 lcampos, float max_dist) {
     Intersection res;
     res.exists = false;
 
-    vec3 lcampos = (CAM_POS - box.o) * box.rot;
-
-    Room r = rooms_data[rr.idx - 1];
-    Ray lray = Ray(clamp((ray.o - box.o) * box.rot, vec3(EPS), r.sz - EPS), ray.dir * box.rot);
-    bool inside = all(greaterThanEqual(lray.o, vec3(0.))) && all(lessThanEqual(lray.o, box.sz));
+    Room r = rooms_data[rid];
+    bool inside = all(greaterThanEqual(lray.o, vec3(0.))) && all(lessThanEqual(lray.o, r.sz));
 
     bool first = true;
+    vec3 start = lray.o;
 
     while (inside) {
         float lvl, csz, vsz;
@@ -251,7 +249,7 @@ Intersection raytrace_room(Ray ray, RoomRef rr, Box box) {
         }
         float ncells = pow(2, MAX_LVL) / csz;
 
-        Cell cell = cell_at(rr.idx - 1, uint(MAX_LVL - lvl), lray.o);
+        Cell cell = cell_at(rid, uint(MAX_LVL - lvl), lray.o);
 
         //AAC aac = AAC(floor(lray.o / csz) * csz, csz);
 
@@ -284,12 +282,18 @@ Intersection raytrace_room(Ray ray, RoomRef rr, Box box) {
             res = bestres;
         }
 
-        if (res.exists) {
-            res.o = box.rot * res.o + box.o;
+
+        if (res.exists) {            
+            if (length(res.o - start) > max_dist)
+                res.exists = false;
             return res;
-        } else {            
+        } else {         
+            if (length(res.exit.o - start) > max_dist) {
+                res.exists = false;   
+                break;
+            }
             lray.o = res.exit.o + res.exit.dir * EPS;
-            inside = all(greaterThanEqual(lray.o, vec3(0.))) && all(lessThan(lray.o, box.sz));
+            inside = all(greaterThanEqual(lray.o, vec3(0.))) && all(lessThan(lray.o, r.sz));
             res.exists = false;
         }
     }
@@ -297,7 +301,7 @@ Intersection raytrace_room(Ray ray, RoomRef rr, Box box) {
     return res;
 }
 
-Intersection raytrace_rooms(Ray ray) 
+Intersection raytrace_rooms(Ray ray, float max_dist) 
 {
     vec3 start = ray.o;
     bool first = true;
@@ -341,25 +345,29 @@ Intersection raytrace_rooms(Ray ray)
         if (closest.exists) {
             lastRridx = rridx;
             path += length(ray.o - closest.o);
+            if (path > max_dist) break;
             ray.o = closest.o;
             
-            Intersection local = raytrace_room(ray, roomrefs_data[rridx], closestBox);
+            uint rid = roomrefs_data[rridx].idx - 1;
+            Ray lray = Ray(clamp((ray.o - closestBox.o) * closestBox.rot, vec3(EPS), rooms_data[rid].sz - EPS), ray.dir * closestBox.rot);
+            vec3 lcampos = (CAM_POS - closestBox.o) * closestBox.rot;
+            Intersection local = raytrace_room(rid, lray, lcampos, max_dist - path);
 
             if (local.exists) {
+                local.o = closestBox.rot * local.o + closestBox.o;
                 path += length(ray.o - local.o);
                 closest = local;
-                hit = true;
+                if (path < max_dist) hit = true;
                 break;
             } else {
                 path += length(ray.o - closest.exit.o);
+                if (path > max_dist) break;
             }
-
             
             ray = closest.exit;
         }
 
         first = false;
-        //break;
     }
 
     if (!hit)
@@ -380,7 +388,7 @@ void main()
 
     Ray ray = Ray(start, dir);
 
-    Intersection inter = raytrace_rooms(ray);
+    Intersection inter = raytrace_rooms(ray, FOG_DIST);
 
     vec3 frontCol = texture(texture1, fragTexCoord).rgb;
     if (length(frontCol) != 0)

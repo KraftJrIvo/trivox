@@ -14,6 +14,7 @@ void initBounceBall(Entity* ent, u8 rrid, WorldState* ws) {
     //auto col = COLORS[GetRandomValue(0, COLORS.size() - 1)];
     //ws->shapes.at(shid).color =  {col.r / 255.f, col.g / 255.f, col.b / 255.f};
     ws->shapes.at(shid).color = {RAND_FLOAT, RAND_FLOAT, RAND_FLOAT};
+    ws->shapes.at(shid).materialIdx = (rand() % 10 < 1) ? 1 : 0;
 }
 
 void updateBounceBall(Entity* ent, WorldState* ws, float delta) {

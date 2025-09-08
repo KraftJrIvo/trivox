@@ -11,16 +11,25 @@ extern "C" const unsigned char res_icon[];
 extern "C" const size_t res_icon_len;
 
 extern "C" const unsigned char res_raytrace_frag[];
+extern "C" const unsigned char res_res_casc_frag[];
 
 class RendererImpl : public Renderer {
     World::Ptr _w;
     Camera _cam;
     uvec2 _initSz;
-    Vector2 _winSz, _baseWinSz;
+    Vector2 _winSz, _baseWinSz, _sclWinSz;
     float _time, _lastReszTime;
-    Shader _shader;
-    RenderTexture2D _backTex, _frontTex;
+    float _scale = 1.0f;
+    Shader _raytraceShader, _resCascShader;
+    RenderTexture2D _backTex, _frontTex, _traceTex, _resCascTex;
     bool _drawGrids = true;
+    bool _drawCasc = false;
+
+    int res_casc_n_probe_extra_lvls = 0;
+    int res_casc_lvl_0_res = 8;
+    int res_casc_n_iterations = 10;
+
+    Vector2 RendererImpl::getResCascTexSz();
 
     void _resetCamPos();
     void _updateShaderSize();
@@ -41,18 +50,29 @@ RendererImpl::RendererImpl(World::Ptr w, uvec2 sz) : _w(w), _initSz(sz) {
     SetTargetFPS(120);
     SetExitKey(KEY_F4);
 
-    _shader = LoadShaderFromMemory(nullptr, (const char *)res_raytrace_frag);
+    _raytraceShader = LoadShaderFromMemory(nullptr, (const char *)res_raytrace_frag);
+    _resCascShader = LoadShaderFromMemory(nullptr, (const char *)res_res_casc_frag);
     _winSz = Vector2{(float)_initSz.x(), (float)_initSz.y()};
     _baseWinSz = _winSz;
     _updateShaderSize();
 }
 
+Vector2 RendererImpl::getResCascTexSz() {
+    int lvlside = res_casc_lvl_0_res * (1 << res_casc_n_probe_extra_lvls) * 8;
+    int w = lvlside * (TRIVOX_MAX_LVL - TRIVOX_MIN_LVL + 1);
+    int h = lvlside * 8;
+    return {(float)w/* * TRIVOX_MAX_ROOMS*/, (float)h};
+}
+
 void RendererImpl::_updateShaderSize() {
-    SetShaderValue(_shader, GetShaderLocation(_shader, "RESOLUTION"), &_winSz,
-                   SHADER_ATTRIB_VEC2);
-    Image imBlank = GenImageColor(_winSz.x, _winSz.y, BLANK);
-    _backTex = LoadRenderTexture(_winSz.x, _winSz.y);
-    _frontTex = LoadRenderTexture(_winSz.x, _winSz.y);
+    _sclWinSz = _winSz * _scale;
+    SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "RESOLUTION"), &_sclWinSz, SHADER_ATTRIB_VEC2);
+    Image imBlank = GenImageColor(_sclWinSz.x, _sclWinSz.y, BLANK);
+    _backTex = LoadRenderTexture(_sclWinSz.x, _sclWinSz.y);
+    _frontTex = LoadRenderTexture(_sclWinSz.x, _sclWinSz.y);
+    _traceTex = LoadRenderTexture(_sclWinSz.x, _sclWinSz.y);
+    auto rctsz = getResCascTexSz();
+    _resCascTex = LoadRenderTexture(rctsz.x, rctsz.y);
     _lastReszTime = GetTime();
 }
 
@@ -132,6 +152,20 @@ void RendererImpl::_input() {
             EndTextureMode();
         }
     }
+
+    if (IsKeyPressed(KEY_C))
+        _drawCasc = !_drawCasc;
+
+    float newScale = _scale;
+    if (IsKeyPressed(KEY_EQUAL))
+        newScale /= 2.0f;
+    if (IsKeyPressed(KEY_MINUS))
+        newScale *= 2.0f;
+    newScale = std::clamp(newScale, 0.0625f, 1.0f);
+    if (newScale != _scale) {
+        _scale = newScale;
+        _updateShaderSize();
+    }
 }
 
 void drawRoomGrid(vec3 A, vec3 B, vec3 C, vec3 D, int n1, int n2, vec3 campos,
@@ -203,8 +237,7 @@ void RendererImpl::startRender() {
         //once = false;
 
         _time = GetTime();
-        SetShaderValue(_shader, GetShaderLocation(_shader, "TIME"), &_time,
-                       SHADER_ATTRIB_FLOAT);
+        SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "TIME"), &_time, SHADER_ATTRIB_FLOAT);
 
         Vector3 lookdir = Vector3Normalize(Vector3{
             _cam.target.x - _cam.position.x, 
@@ -238,20 +271,45 @@ void RendererImpl::startRender() {
         rlUpdateShaderBuffer(ssboRoomRefs, _w->_state.roomRefs.data(), _w->_state.roomRefs.size(), 0);
         rlUpdateShaderBuffer(ssboCells, _w->_cells.data(), _w->_cells.size(), 0);
 
-        SetShaderValueMatrix(_shader, GetShaderLocation(_shader, "CAM_MVP"), mvp);
-        SetShaderValue(_shader, GetShaderLocation(_shader, "CAM_FOV"), &_cam.fovy, SHADER_ATTRIB_FLOAT);
-        SetShaderValue(_shader, GetShaderLocation(_shader, "CAM_POS"), &_cam.position, SHADER_ATTRIB_VEC3);
-        SetShaderValue(_shader, GetShaderLocation(_shader, "TIME"), &_time, SHADER_ATTRIB_FLOAT);
+        SetShaderValue(_resCascShader, GetShaderLocation(_resCascShader, "N_PROBE_EXTRA_LVLS"), &res_casc_n_probe_extra_lvls, SHADER_UNIFORM_INT);
+        SetShaderValue(_resCascShader, GetShaderLocation(_resCascShader, "N_ITERS"), &res_casc_n_iterations, SHADER_UNIFORM_INT);
+        SetShaderValue(_resCascShader, GetShaderLocation(_resCascShader, "LVL_0_RES"), &res_casc_lvl_0_res, SHADER_UNIFORM_INT);
+        BeginTextureMode(_resCascTex);
+        ClearBackground(BLACK);
+        for (int i = 0; i < res_casc_n_iterations; ++i) {
+            BeginShaderMode(_resCascShader);
+            DrawTextureRec(_resCascTex.texture,
+                        Rectangle{0, 0, (float)_resCascTex.texture.width, (float)-_resCascTex.texture.height},
+                        Vector2{0, 0}, WHITE);
+            EndShaderMode();
+        }
+        EndTextureMode();
 
-        BeginDrawing();
-        BeginShaderMode(_shader);
-        rlEnableShader(_shader.id);
-        rlSetUniformSampler(GetShaderLocation(_shader, "texture1"), _frontTex.texture.id);
-        DrawTextureRec(_backTex.texture,
-                       Rectangle{0, 0, (float)_backTex.texture.width, (float)-_backTex.texture.height},
-                       Vector2{0, 0}, WHITE);
+        SetShaderValueMatrix(_raytraceShader, GetShaderLocation(_raytraceShader, "CAM_MVP"), mvp);
+        SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "CAM_FOV"), &_cam.fovy, SHADER_ATTRIB_FLOAT);
+        SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "CAM_POS"), &_cam.position, SHADER_ATTRIB_VEC3);
+        SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "TIME"), &_time, SHADER_ATTRIB_FLOAT);
+
+        BeginTextureMode(_traceTex);
+        BeginShaderMode(_raytraceShader);
+        rlEnableShader(_raytraceShader.id);
+        rlSetUniformSampler(GetShaderLocation(_raytraceShader, "texture1"), _frontTex.texture.id);
+        DrawTexturePro(_backTex.texture,
+            Rectangle{0, 0, (float)_backTex.texture.width, (float)-_backTex.texture.height},
+            Rectangle{0, 0, _sclWinSz.x, _sclWinSz.y}, Vector2Zero(), 0, WHITE);
         EndShaderMode();
         DrawText(std::to_string(GetFPS()).c_str(), 10, 10, 10, RED);
+        EndTextureMode();
+
+        BeginDrawing();
+        DrawTexturePro(_traceTex.texture,
+            Rectangle{0, 0, (float)_traceTex.texture.width, (float)-_traceTex.texture.height},
+            Rectangle{0, 0, _winSz.x, _winSz.y}, Vector2Zero(), 0, WHITE);
+        if (_drawCasc) {
+            DrawTextureRec(_resCascTex.texture,
+                Rectangle{0, 0, (float)_resCascTex.texture.width, (float)-_resCascTex.texture.height},
+                Vector2{0, 0}, WHITE);
+        }
         EndDrawing();
 
         _input();

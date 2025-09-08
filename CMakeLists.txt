@@ -10,6 +10,7 @@ project(TRIVOX VERSION 1.0 DESCRIPTION "raytraced oct-tree voxel 3d engine" LANG
 add_executable(embedfile src/embedfile.c)
 add_custom_command(OUTPUT res_icon.c          COMMAND embedfile res_icon          ${TRIVOX_SOURCE_DIR}/res/icon.png      DEPENDS ${TRIVOX_SOURCE_DIR}/res/icon.png)
 add_custom_command(OUTPUT res_raytrace_frag.c COMMAND embedfile res_raytrace_frag ${TRIVOX_SOURCE_DIR}/res/raytrace.frag DEPENDS ${TRIVOX_SOURCE_DIR}/res/raytrace.frag)
+add_custom_command(OUTPUT res_res_casc_frag.c COMMAND embedfile res_res_casc_frag ${TRIVOX_SOURCE_DIR}/res/res_casc.frag DEPENDS ${TRIVOX_SOURCE_DIR}/res/res_casc.frag)
 
 set(TRIVOX_SOURCE_FILES
     "src/memory.hpp"
@@ -25,6 +26,7 @@ set(TRIVOX_SOURCE_FILES
     "src/ent/inf_point.cpp"
     res_icon.c
     res_raytrace_frag.c
+    res_res_casc_frag.c
     "res/icon.rc"
 )
 add_executable(TRIVOX ${TRIVOX_SOURCE_FILES})
