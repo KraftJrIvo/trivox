@@ -26,8 +26,8 @@ class RendererImpl : public Renderer {
     bool _drawCasc = false;
 
     int res_casc_n_probe_extra_lvls = 0;
-    int res_casc_lvl_0_res = 8;
-    int res_casc_n_iterations = 10;
+    int res_casc_lvl_0_res = 64;
+    int res_casc_n_iterations = 1;
 
     Vector2 RendererImpl::getResCascTexSz();
 
@@ -289,11 +289,15 @@ void RendererImpl::startRender() {
         SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "CAM_FOV"), &_cam.fovy, SHADER_ATTRIB_FLOAT);
         SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "CAM_POS"), &_cam.position, SHADER_ATTRIB_VEC3);
         SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "TIME"), &_time, SHADER_ATTRIB_FLOAT);
+        SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "N_PROBE_EXTRA_LVLS"), &res_casc_n_probe_extra_lvls, SHADER_UNIFORM_INT);
+        SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "N_ITERS"), &res_casc_n_iterations, SHADER_UNIFORM_INT);
+        SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "LVL_0_RES"), &res_casc_lvl_0_res, SHADER_UNIFORM_INT);
 
         BeginTextureMode(_traceTex);
         BeginShaderMode(_raytraceShader);
         rlEnableShader(_raytraceShader.id);
         rlSetUniformSampler(GetShaderLocation(_raytraceShader, "texture1"), _frontTex.texture.id);
+        rlSetUniformSampler(GetShaderLocation(_raytraceShader, "texture2"), _resCascTex.texture.id);
         DrawTexturePro(_backTex.texture,
             Rectangle{0, 0, (float)_backTex.texture.width, (float)-_backTex.texture.height},
             Rectangle{0, 0, _sclWinSz.x, _sclWinSz.y}, Vector2Zero(), 0, WHITE);

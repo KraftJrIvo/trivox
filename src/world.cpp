@@ -114,8 +114,19 @@ class WorldImpl : public World {
             _state.roomRefs.at(1).color = vec3{1.0, 1.0, 0};
             _state.roomRefs.at(2).color = vec3{0, 0, 1.0};
             
-            for (int i = 0; i < 100; ++i)
-                auto eid = _addEntity(rrid0, EntityType::BOUNCE_BALL, {RAND_FLOAT * 6 + 1, RAND_FLOAT * 6 + 1, RAND_FLOAT * 6 + 1});                
+            //for (int i = 0; i < 100; ++i)
+            //    auto eid = _addEntity(rrid0, EntityType::BOUNCE_BALL, {RAND_FLOAT * 6 + 1, RAND_FLOAT * 6 + 1, RAND_FLOAT * 6 + 1});
+            auto eid = _addEntity(rrid0, EntityType::BOUNCE_BALL, {4, 4, 4});
+            //_state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]).materialIdx = 1;
+            for (int x = -1; x <= 1; x += 2) {
+                for (int y = -1; y <= 1; y += 2) {
+                    for (int z = -1; z <= 1; z += 2) {
+                        auto eid = _addEntity(rrid0, EntityType::BOUNCE_BALL, {4.0f + x * 1.5f, 4.0f + y * 1.5f, 4.0f + z * 1.5f});
+                        _state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]).materialIdx = 1;
+                        _state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]).color = {float((x + 1) / 2), float((y + 1) / 2), float((z + 1) / 2)};
+                    }
+                }
+            }
         }
         
         void WorldImpl::update(float delta) {

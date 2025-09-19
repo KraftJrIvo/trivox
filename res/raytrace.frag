@@ -76,7 +76,11 @@ uniform vec3 CAM_POS;
 
 uniform sampler2D texture0;
 uniform sampler2D texture1;
+uniform sampler2D texture2;
 
+uniform int N_PROBE_EXTRA_LVLS;
+uniform int N_ITERS;
+uniform int LVL_0_RES;
 
 struct Sphere {
     vec3 o;
@@ -121,31 +125,124 @@ Cell cell_at(uint room, uint lvl, vec3 pos) {
     return cells_data[roomoff + lvloff + celloff];
 }
 
-Intersection raytrace_sphere(Ray ray, Sphere sphere) {
-    vec3 oc = ray.o - sphere.o;
-    float a = dot(ray.dir, ray.dir);
-    float b = 2.0 * dot(oc, ray.dir);
-    float c = dot(oc, oc) - sphere.r * sphere.r;
-    float discriminant = b * b - 4.0 * a * c;
-    
-    Intersection result;
-    result.exists = false;
-    
-    if (discriminant >= 0.0) {
-        float t = (-b - sqrt(discriminant)) / (2.0 * a);
-        if (t > 0.0) {
-            result.exists = true;
-            result.o = ray.o + t * ray.dir;
-            result.n = normalize(result.o - sphere.o);
-            vec3 lightdir = normalize(vec3(4., 4., 4.) - result.o);
-            vec3 amb = vec3(.1) * sphere.col;
-            vec3 dif = sphere.col * max(dot(lightdir, result.n), 0.);
-            vec3 spc = vec3(pow(max(0., dot(reflect(-lightdir, result.n), -ray.dir)), 50.)) * .33;
-            result.col = amb + dif + spc;
-        }
+vec2 lambertAzimuthalForward(vec3 p) {
+    float denom = 1.0 - p.y;
+    float factor = sqrt(2.0 / denom);
+    return 0.5 * factor * p.xz;
+}
+
+vec3 lambertAzimuthalInverse(vec2 p) {
+    float rho = length(p);
+    if (rho < 1e-6) {
+        return vec3(0.0, -1.0, 0.0);
     }
+    float rho2 = rho * 2.0;
+    float c = 2.0 * asin(rho2 * 0.5);
+    float sc = sin(c);
+    return vec3(
+        (p.x / rho) * sc,
+        -cos(c),
+        (p.y / rho) * sc
+    );
+}
+
+vec4 trilinear(
+    vec4 f000, vec4 f100,
+    vec4 f010, vec4 f110,
+    vec4 f001, vec4 f101,
+    vec4 f011, vec4 f111,
+    vec3 uvw
+) {
+    float u = uvw.x;
+    float v = uvw.y;
+    float w = uvw.z;
+
+    vec4 c00 = mix(f000, f100, u);
+    vec4 c10 = mix(f010, f110, u);
+    vec4 c01 = mix(f001, f101, u);
+    vec4 c11 = mix(f011, f111, u);
+
+    vec4 c0 = mix(c00, c10, v);
+    vec4 c1 = mix(c01, c11, v);
+
+    return mix(c0, c1, w);
+}
+
+vec4 getProbeVal(uint room, uint lvl, vec3 cell, vec3 dir) {
+    int lvlside = LVL_0_RES * (1 << N_PROBE_EXTRA_LVLS) * 8;
+    int roomside = (lvlside * (MAX_LVL - MIN_LVL + 1 + N_PROBE_EXTRA_LVLS));
+    int cellsz = (1 << lvl) * lvlside / 8;
+    vec2 celpos = vec2(room * roomside + lvl * lvlside + cellsz * cell.x, cell.z * lvlside + cell.y * cellsz);
+    vec2 pix = celpos + (lambertAzimuthalForward(dir) + 1.) * .5 * cellsz;
+    return texture(texture2, pix / textureSize(texture2, 0).xy);
+}
+
+vec3 getLightFrom(uint room, uint lvl, vec3 pos, vec3 dir) {
+    vec3 col = vec3(0.);
+    float alpha = 0.;
+    for (int i = MIN_LVL; i <= lvl; ++i) {
+        int n3dcells = (1 << ((MAX_LVL - i) + N_PROBE_EXTRA_LVLS));
+        float cell3dsz = 8. / float(n3dcells);
+        vec3 pf000 = clamp(floor(pos / cell3dsz - 0.5), vec3(0.), vec3(float(n3dcells - 1)));
+        vec3 pf111 = clamp(pf000 + vec3(1.), vec3(0.), vec3(float(n3dcells - 1)));
+        vec3 diff = pf111 - pf000;
+        vec3 pf100 = pf000 + vec3(diff.x, 0., 0.);
+        vec3 pf010 = pf000 + vec3(0., diff.y, 0.);
+        vec3 pf001 = pf000 + vec3(0., 0., diff.z);
+        vec3 pf110 = pf000 + vec3(diff.x, diff.y, 0.);
+        vec3 pf011 = pf000 + vec3(0., diff.y, diff.z);
+        vec3 pf101 = pf000 + vec3(diff.x, 0., diff.z);
+        vec4 f000 = getProbeVal(room, i, pf000, dir);
+        vec4 f100 = getProbeVal(room, i, pf100, dir);
+        vec4 f010 = getProbeVal(room, i, pf010, dir);
+        vec4 f001 = getProbeVal(room, i, pf001, dir);
+        vec4 f110 = getProbeVal(room, i, pf110, dir);
+        vec4 f011 = getProbeVal(room, i, pf011, dir);
+        vec4 f101 = getProbeVal(room, i, pf101, dir);
+        vec4 f111 = getProbeVal(room, i, pf111, dir);
+        vec3 uvw = (((pos / cell3dsz - 0.5) - pf000) * cell3dsz) / cell3dsz;
+        vec4 val = trilinear(f000, f100, f010, f110, f001, f101, f011, f111, uvw);
+        //vec4 val = f000;
+        //vec4 val = vec4(pf000 / 8., 1.);
+        col = mix(col, val.rgb, val.a);
+        //break;
+        alpha += val.a;
+        if (alpha >= 1.)
+            break;
+    }
+    return col;
+}
+
+Intersection raytrace_sphere(Ray ray, Sphere sph, bool light) {
+    Intersection res; res.exists = false;
+    vec3 oc = ray.o - sph.o;
+    float r = sph.r;
+    float h = dot(oc, ray.dir); 
+    float c = dot(oc, oc) - r * r;
+    float disc = h * h - c;
+    if (disc <= 0.0) return res;
+    float t = -h - sqrt(disc);
+    if (t <= 0.0) return res;
+    res.exists = true;
+    res.o = ray.o + t * ray.dir;
+    res.n = normalize(res.o - sph.o);
     
-    return result;
+    vec3 lightdir = normalize(vec3(4.0) - res.o);
+    vec3 amb = 0.1 * sph.col;
+    vec3 dif = sph.col * max(dot(lightdir, res.n), 0.0);
+    vec3 spc = vec3(pow(max(0.0, dot(reflect(-lightdir, res.n), -ray.dir)), 50.0)) * 0.33;
+
+    //vec3 amb = 0.1 * sph.col;
+    //vec3 lightdir = reflect(ray.dir, res.n);
+    //vec3 dif = sph.col * getLightFrom(0, MAX_LVL, res.o, lightdir) * max(dot(lightdir, res.n), 0.0);
+    //res.col = light ? vec3(1.) : (amb + dif);
+    
+    //res.col = amb + dif + spc;
+    //res.col = light ? vec3(1.) : getLightFrom(0, MAX_LVL, res.o, res.n);
+    //res.col = light ? getProbeVal(0, 3, vec3(0), res.n).rgb : (amb + dif + spc);
+    res.col = light ? sph.col : getLightFrom(0, MAX_LVL, res.o, res.n);
+    
+    return res;
 }
 
 Intersection raytrace_box(Ray ray, Box box) {
@@ -272,7 +369,7 @@ Intersection raytrace_room(uint rid, Ray lray, vec3 lcampos, float max_dist) {
                 vec3 center = verts_data[shape.vid0];
                 vec3 params = verts_data[shape.vid1];
                 Sphere sph = Sphere(center, params[0], shape.col);
-                res = raytrace_sphere(lray, sph);
+                res = raytrace_sphere(lray, sph, shape.matIdx == 1);
                 float dist = length(res.o - lray.o);
                 if (res.exists && dist < besdist) {
                     bestres = res;
