@@ -8,6 +8,7 @@ const float MIN_VSZ = 100.;
 const int MIN_LVL = 0;
 const int MAX_LVL = 3;
 const float FOG_DIST = 100.;
+const float PI = 3.14159265358979323846;
 const vec3 FOG_COLOR = vec3(0.);
 
 in vec2 fragTexCoord;
@@ -212,6 +213,26 @@ vec3 getLightFrom(uint room, uint lvl, vec3 pos, vec3 dir) {
     }
     return col;
 }
+void buildOrthonormalBasis(vec3 n, out vec3 t, out vec3 b) {
+    vec3 up = (abs(n.z) < 0.999) ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+    t = normalize(cross(up, n));
+    b = cross(n, t);
+}
+
+vec3 cosineSampleHemisphere(vec3 u) {
+    float r = sqrt(u.x);
+    float theta = 2.0 * PI * fract(u.y + u.z * 0.3180339);
+    float x = r * cos(theta);
+    float y = r * sin(theta);
+    float z = sqrt(max(0.0, 1.0 - u.x));
+    return vec3(x, y, z);
+}
+
+float hash12(vec3 p) {
+    vec3 p3 = fract(p * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
 
 Intersection raytrace_sphere(Ray ray, Sphere sph, bool light) {
     Intersection res; res.exists = false;
@@ -240,8 +261,25 @@ Intersection raytrace_sphere(Ray ray, Sphere sph, bool light) {
     //res.col = amb + dif + spc;
     //res.col = light ? vec3(1.) : getLightFrom(0, MAX_LVL, res.o, res.n);
     //res.col = light ? getProbeVal(0, 3, vec3(0), res.n).rgb : (amb + dif + spc);
-    res.col = light ? sph.col : getLightFrom(0, MAX_LVL, res.o, res.n);
-    //res.col = light ? sph.col : (amb + dif + spc);
+    
+    //res.col = light ? sph.col : getLightFrom(0, MAX_LVL, res.o, res.n);
+    vec3 tt, b;
+    buildOrthonormalBasis(res.n, tt, b);
+    vec3 accum = vec3(0.0);
+    vec3 seed = floor((res.o - sph.o) * 256.0 + 0.5);
+    for (int i = 0; i < 8; ++i) {
+        float jx = hash12(seed + vec3(float(i), 0.0, 0.0));
+        float jy = hash12(seed + vec3(0.0, float(i), 0.0));
+        float jz = hash12(seed + vec3(0.0, 0.0, float(i)));
+        vec3 d = cosineSampleHemisphere(vec3(jx, jy, jz));
+        vec3 w = normalize(tt * d.x + b * d.y + res.n * d.z);
+        accum += getLightFrom(0, 0, res.o, w);
+    }
+    vec3 irradiance = accum * (PI / 8.0);
+    vec3 diffuse = sph.col * irradiance;
+    vec3 refl = reflect(-ray.dir, res.n);
+    vec3 specular = getLightFrom(0, MAX_LVL, res.o, refl) * 0.25;
+    res.col = light ? sph.col : (diffuse);
     
     return res;
 }
