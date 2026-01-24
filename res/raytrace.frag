@@ -200,7 +200,7 @@ vec3 getLightFrom(uint room, uint lvl, vec3 pos, vec3 dir) {
         vec4 f011 = getProbeVal(room, i, pf011, dir);
         vec4 f101 = getProbeVal(room, i, pf101, dir);
         vec4 f111 = getProbeVal(room, i, pf111, dir);
-        vec3 uvw = (((pos / cell3dsz - 0.5) - pf000) * cell3dsz) / cell3dsz;
+        vec3 uvw = ((pos / cell3dsz - 0.5) - pf000);
         vec4 val = trilinear(f000, f100, f010, f110, f001, f101, f011, f111, uvw);
         //vec4 val = f000;
         //vec4 val = vec4(pf000 / 8., 1.);
@@ -240,8 +240,8 @@ Intersection raytrace_sphere(Ray ray, Sphere sph, bool light) {
     //res.col = amb + dif + spc;
     //res.col = light ? vec3(1.) : getLightFrom(0, MAX_LVL, res.o, res.n);
     //res.col = light ? getProbeVal(0, 3, vec3(0), res.n).rgb : (amb + dif + spc);
-    //res.col = light ? sph.col : getLightFrom(0, MAX_LVL, res.o, res.n);
-    res.col = light ? sph.col : (amb + dif + spc);
+    res.col = light ? sph.col : getLightFrom(0, MAX_LVL, res.o, res.n);
+    //res.col = light ? sph.col : (amb + dif + spc);
     
     return res;
 }

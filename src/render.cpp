@@ -1,4 +1,5 @@
 #include "render.h"
+#include "raylib.h"
 #include "raymath.h"
 #include "rcamera.h"
 #include "rlgl.h"
@@ -74,6 +75,7 @@ void RendererImpl::_updateShaderSize() {
     auto rctsz = getResCascTexSz();
     _resCascTex = LoadRenderTexture(rctsz.x, rctsz.y);
     _lastReszTime = GetTime();
+    SetTextureFilter(_resCascTex.texture, TEXTURE_FILTER_BILINEAR);
 }
 
 void RendererImpl::_resetCamPos() {
@@ -275,7 +277,7 @@ void RendererImpl::startRender() {
         SetShaderValue(_resCascShader, GetShaderLocation(_resCascShader, "N_ITERS"), &res_casc_n_iterations, SHADER_UNIFORM_INT);
         SetShaderValue(_resCascShader, GetShaderLocation(_resCascShader, "LVL_0_RES"), &res_casc_lvl_0_res, SHADER_UNIFORM_INT);
         BeginTextureMode(_resCascTex);
-        ClearBackground(BLACK);
+        ClearBackground(BLANK);
         for (int i = 0; i < res_casc_n_iterations; ++i) {
             BeginShaderMode(_resCascShader);
             DrawTextureRec(_resCascTex.texture,
