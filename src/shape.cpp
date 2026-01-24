@@ -55,19 +55,21 @@ AABB shapeGetAABB(const ShapeType& type, const std::array<vec3, 3>& vs)
                     std::max(vs[0].z(), std::max(vs[1].z(), vs[2].z()))
                 }
         };
-    case ShapeType::QUAD:
+    case ShapeType::QUAD: {
+        vec3 v3 = vs[0] + vs[2] - vs[1];
         return AABB{
                 vec3{
-                    std::min(vs[0].x(), std::min(vs[1].x(), std::min(vs[2].x(), vs[3].x()))), 
-                    std::min(vs[0].y(), std::min(vs[1].y(), std::min(vs[2].y(), vs[3].y()))), 
-                    std::min(vs[0].z(), std::min(vs[1].z(), std::min(vs[2].z(), vs[3].z())))
-                }, 
+                    std::min(vs[0].x(), std::min(vs[1].x(), std::min(vs[2].x(), v3.x()))),
+                    std::min(vs[0].y(), std::min(vs[1].y(), std::min(vs[2].y(), v3.y()))),
+                    std::min(vs[0].z(), std::min(vs[1].z(), std::min(vs[2].z(), v3.z())))
+                },
                 vec3{
-                    std::max(vs[0].x(), std::max(vs[1].x(), std::max(vs[2].x(), vs[3].x()))), 
-                    std::max(vs[0].y(), std::max(vs[1].y(), std::max(vs[2].y(), vs[3].y()))), 
-                    std::max(vs[0].z(), std::max(vs[1].z(), std::max(vs[2].z(), vs[3].z())))
+                    std::max(vs[0].x(), std::max(vs[1].x(), std::max(vs[2].x(), v3.x()))),
+                    std::max(vs[0].y(), std::max(vs[1].y(), std::max(vs[2].y(), v3.y()))),
+                    std::max(vs[0].z(), std::max(vs[1].z(), std::max(vs[2].z(), v3.z())))
                 }
         };
+    }
     default:
         return AABB{};
     }
@@ -92,7 +94,7 @@ bool shapeCollidesAABB(const ShapeType& type, const AABB& aabb, const std::array
     }
     case ShapeType::LINE: {
         const vec3& p1 = vs[0];
-        const vec3& p2 = vs[0];
+        const vec3& p2 = vs[1];
         vec3 dir = p2 - p1;
         float tmin = 0.0f, tmax = 1.0f;
         for (int i = 0; i < 3; ++i) {
@@ -151,9 +153,10 @@ bool shapeCollidesAABB(const ShapeType& type, const AABB& aabb, const std::array
         return true;
     }
     case ShapeType::QUAD: {
+        vec3 v[4] = {vs[0], vs[1], vs[2], vs[0] + vs[2] - vs[1]};
         vec3 edges[4];
         for (int i = 0; i < 4; ++i)
-            edges[i] = vs[(i + 1) % 4] - vs[i];
+            edges[i] = v[(i + 1) % 4] - v[i];
         vec3 normal = edges[0].cross(edges[1]).normalized();
         vec3 aabbVerts[8];
         for (int i = 0; i < 8; ++i) {
@@ -180,7 +183,7 @@ bool shapeCollidesAABB(const ShapeType& type, const AABB& aabb, const std::array
             float minAABB = std::numeric_limits<float>::max();
             float maxAABB = -std::numeric_limits<float>::max();
             for (int i = 0; i < 4; ++i) {
-                float proj = vs[i].dot(axis);
+                float proj = v[i].dot(axis);
                 minShape = std::min(minShape, proj);
                 maxShape = std::max(maxShape, proj);
             }

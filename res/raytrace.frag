@@ -240,7 +240,8 @@ Intersection raytrace_sphere(Ray ray, Sphere sph, bool light) {
     //res.col = amb + dif + spc;
     //res.col = light ? vec3(1.) : getLightFrom(0, MAX_LVL, res.o, res.n);
     //res.col = light ? getProbeVal(0, 3, vec3(0), res.n).rgb : (amb + dif + spc);
-    res.col = light ? sph.col : getLightFrom(0, MAX_LVL, res.o, res.n);
+    //res.col = light ? sph.col : getLightFrom(0, MAX_LVL, res.o, res.n);
+    res.col = light ? sph.col : (amb + dif + spc);
     
     return res;
 }
