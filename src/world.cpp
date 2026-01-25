@@ -1,4 +1,5 @@
 #include "world.h"
+#include "entity.hpp"
 #include "shape.h"
 
 #include <map>
@@ -6,7 +7,7 @@
 class WorldImpl : public World {
     u64 _addRoom(const Room& room);
     u64 _addRoomRef(u8 rid, const mat4& matrix);
-    u64 _addEntity(u8 rid, EntityType type, vec3 locpos);
+    u64 _addEntity(u8 rid, EntityType type, vec3 locpos, float params[TRIVOX_ENTITY_MAX_PARAMS] = nullptr);
     void _fillCells();
     void _fillCellDistances();
     void _fillRoomWithShapeIfInside(u8 lvl, const Shape& shape, u32 shid,
@@ -24,11 +25,14 @@ class WorldImpl : public World {
         return _state.roomRefs.acquire(RoomRef((u32)rid, matrix));
     }
     
-    u64 WorldImpl::_addEntity(u8 rrid, EntityType type, vec3 locpos) {
+    u64 WorldImpl::_addEntity(u8 rrid, EntityType type, vec3 locpos, float params[TRIVOX_ENTITY_MAX_PARAMS]) {
         auto& rr = _state.roomRefs.at(rrid);
         mat4 matrix = rr.matrix();
         auto pos = (matrix.ROTMAT.inverse() * locpos) + matrix.POSVEC;
         auto ent = Entity{type, rrid, pos};
+        if (params)
+            for (int i = 0; i < TRIVOX_ENTITY_MAX_PARAMS; ++i)
+                ent.params[i] = params[i];
         auto eid = _state.entities.acquire(ent);
         _state.entities.at(eid).init(rrid,& _state);
         return eid;
@@ -116,17 +120,26 @@ class WorldImpl : public World {
             
             //for (int i = 0; i < 100; ++i)
             //    auto eid = _addEntity(rrid0, EntityType::BOUNCE_BALL, {RAND_FLOAT * 6 + 1, RAND_FLOAT * 6 + 1, RAND_FLOAT * 6 + 1});
-            auto eid = _addEntity(rrid0, EntityType::BOUNCE_BALL, {4, 4, 4});
+            float radii[TRIVOX_ENTITY_MAX_PARAMS] = {0.5f};
+            auto eid = _addEntity(rrid0, EntityType::BOUNCE_BALL, {4, 4, 4}, radii);
+            radii[0] = 0.25f;
             //_state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]).materialIdx = 1;
             for (int x = -1; x <= 1; x += 2) {
                 for (int y = -1; y <= 1; y += 2) {
                     for (int z = -1; z <= 1; z += 2) {
-                        auto eid = _addEntity(rrid0, EntityType::BOUNCE_BALL, {4.0f + x * 1.5f, 4.0f + y * 1.5f, 4.0f + z * 1.5f});
+                        auto eid = _addEntity(rrid0, EntityType::BOUNCE_BALL, {4.0f + x * 1.5f, 4.0f + y * 1.5f, 4.0f + z * 1.5f}, radii);
                         _state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]).materialIdx = 1;
                         _state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]).color = {float((x + 1) / 2), float((y + 1) / 2), float((z + 1) / 2)};
                     }
                 }
             }
+
+            float params[TRIVOX_ENTITY_MAX_PARAMS] = {1, 0, 0, 4};
+            eid = _addEntity(rrid0, EntityType::PLANE, {0.001f, 4, 4}, params);
+            params[1] = 1; params[0] = 0; 
+            eid = _addEntity(rrid0, EntityType::PLANE, {4, 0.001f, 4}, params);
+            params[2] = -1; params[1] = 0; 
+            eid = _addEntity(rrid0, EntityType::PLANE, {4, 4, 8.0f - 0.001f}, params);
         }
         
         void WorldImpl::update(float delta) {

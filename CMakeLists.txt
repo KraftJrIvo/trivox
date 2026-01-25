@@ -22,6 +22,7 @@ set(TRIVOX_SOURCE_FILES
     "src/render.cpp"
     "src/main.cpp"
     "src/ent/bounce_ball.cpp"
+    "src/ent/plane.cpp"
     "src/ent/rot_box.cpp"
     "src/ent/inf_point.cpp"
     res_icon.c

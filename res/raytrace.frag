@@ -10,6 +10,8 @@ const int MAX_LVL = 3;
 const float FOG_DIST = 100.;
 const float PI = 3.14159265358979323846;
 const vec3 FOG_COLOR = vec3(0.);
+const uint SHAPE_SPHERE = 2u;
+const uint SHAPE_QUAD = 6u;
 
 in vec2 fragTexCoord;
 in vec4 fragColor;
@@ -266,7 +268,7 @@ Intersection raytrace_sphere(Ray ray, Sphere sph, bool light) {
     vec3 tt, b;
     buildOrthonormalBasis(res.n, tt, b);
     vec3 accum = vec3(0.0);
-    vec3 seed = floor((res.o - sph.o) * 256.0 + 0.5);
+    vec3 seed = floor((res.o - sph.o) * 0.005 + 0.5);
     for (int i = 0; i < 8; ++i) {
         float jx = hash12(seed + vec3(float(i), 0.0, 0.0));
         float jy = hash12(seed + vec3(0.0, float(i), 0.0));
@@ -278,9 +280,50 @@ Intersection raytrace_sphere(Ray ray, Sphere sph, bool light) {
     vec3 irradiance = accum * (PI / 8.0);
     vec3 diffuse = sph.col * irradiance;
     vec3 refl = reflect(-ray.dir, res.n);
-    vec3 specular = getLightFrom(0, MAX_LVL, res.o, refl) * 0.25;
+    vec3 specular = getLightFrom(0, 0, res.o, refl) * 0.25;
     res.col = light ? sph.col : (diffuse);
     
+    return res;
+}
+
+Intersection raytrace_quad(Ray ray, vec3 v0, vec3 v1, vec3 v2, vec3 col, bool light) {
+    Intersection res; res.exists = false;
+    vec3 v3 = v0 + v2 - v1;
+    vec3 n = normalize(cross(v1 - v0, v2 - v1));
+    float denom = dot(ray.dir, n);
+    if (abs(denom) < EPS) return res;
+    float t = dot(v0 - ray.o, n) / denom;
+    if (t <= EPS) return res;
+
+    vec3 p = ray.o + t * ray.dir;
+    vec3 edges[4] = vec3[4](v1 - v0, v2 - v1, v3 - v2, v0 - v3);
+    vec3 verts[4] = vec3[4](v0, v1, v2, v3);
+    float sign = dot(cross(edges[0], p - verts[0]), n);
+    for (int i = 1; i < 4; ++i) {
+        float s = dot(cross(edges[i], p - verts[i]), n);
+        if (sign * s < 0.0) return res;
+    }
+
+    res.exists = true;
+    res.o = p;
+    res.n = (denom < 0.0) ? n : -n;
+
+    vec3 tt, b;
+    buildOrthonormalBasis(res.n, tt, b);
+    vec3 accum = vec3(0.0);
+    vec3 seed = floor(p * 0.005 + 0.5);
+    for (int i = 0; i < 8; ++i) {
+        float jx = hash12(seed + vec3(float(i), 0.0, 0.0));
+        float jy = hash12(seed + vec3(0.0, float(i), 0.0));
+        float jz = hash12(seed + vec3(0.0, 0.0, float(i)));
+        vec3 d = cosineSampleHemisphere(vec3(jx, jy, jz));
+        vec3 w = normalize(tt * d.x + b * d.y + res.n * d.z);
+        accum += getLightFrom(0, 0, p, w);
+    }
+    vec3 irradiance = accum * (PI / 8.0);
+    vec3 diffuse = col * irradiance;
+    res.col = light ? col : diffuse;
+
     return res;
 }
 
@@ -405,14 +448,25 @@ Intersection raytrace_room(uint rid, Ray lray, vec3 lcampos, float max_dist) {
         if (cell.dist == 0) {
             for (int i = 0; i < cell.nShapes; ++i) {
                 Shape shape = shapes_data[cell.shids[i / 4][i % 4]];
-                vec3 center = verts_data[shape.vid0];
-                vec3 params = verts_data[shape.vid1];
-                Sphere sph = Sphere(center, params[0], shape.col);
-                res = raytrace_sphere(lray, sph, shape.matIdx == 1);
-                float dist = length(res.o - lray.o);
-                if (res.exists && dist < besdist) {
-                    bestres = res;
-                    besdist = dist;
+                if (shape.type == SHAPE_SPHERE) {
+                    vec3 center = verts_data[shape.vid0];
+                    vec3 params = verts_data[shape.vid1];
+                    Sphere sph = Sphere(center, params[0], shape.col);
+                    res = raytrace_sphere(lray, sph, shape.matIdx == 1);
+                } else if (shape.type == SHAPE_QUAD) {
+                    vec3 v0 = verts_data[shape.vid0];
+                    vec3 v1 = verts_data[shape.vid1];
+                    vec3 v2 = verts_data[shape.vid2];
+                    res = raytrace_quad(lray, v0, v1, v2, shape.col, shape.matIdx == 1);
+                } else {
+                    res.exists = false;
+                }
+                if (res.exists) {
+                    float dist = length(res.o - lray.o);
+                    if (dist < besdist) {
+                        bestres = res;
+                        besdist = dist;
+                    }
                 }
             }
             res = bestres;
