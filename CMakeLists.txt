@@ -11,6 +11,8 @@ add_executable(embedfile src/embedfile.c)
 add_custom_command(OUTPUT res_icon.c          COMMAND embedfile res_icon          ${TRIVOX_SOURCE_DIR}/res/icon.png      DEPENDS ${TRIVOX_SOURCE_DIR}/res/icon.png)
 add_custom_command(OUTPUT res_raytrace_frag.c COMMAND embedfile res_raytrace_frag ${TRIVOX_SOURCE_DIR}/res/raytrace.frag DEPENDS ${TRIVOX_SOURCE_DIR}/res/raytrace.frag)
 add_custom_command(OUTPUT res_res_casc_frag.c COMMAND embedfile res_res_casc_frag ${TRIVOX_SOURCE_DIR}/res/res_casc.frag DEPENDS ${TRIVOX_SOURCE_DIR}/res/res_casc.frag)
+add_custom_command(OUTPUT res_pathtrace_frag.c COMMAND embedfile res_pathtrace_frag ${TRIVOX_SOURCE_DIR}/res/pathtrace.frag DEPENDS ${TRIVOX_SOURCE_DIR}/res/pathtrace.frag)
+add_custom_command(OUTPUT res_pathtrace_display_frag.c COMMAND embedfile res_pathtrace_display_frag ${TRIVOX_SOURCE_DIR}/res/pathtrace_display.frag DEPENDS ${TRIVOX_SOURCE_DIR}/res/pathtrace_display.frag)
 
 set(TRIVOX_SOURCE_FILES
     "src/memory.hpp"
@@ -28,6 +30,8 @@ set(TRIVOX_SOURCE_FILES
     res_icon.c
     res_raytrace_frag.c
     res_res_casc_frag.c
+    res_pathtrace_frag.c
+    res_pathtrace_display_frag.c
     "res/icon.rc"
 )
 add_executable(TRIVOX ${TRIVOX_SOURCE_FILES})
@@ -35,8 +39,12 @@ target_include_directories(TRIVOX PUBLIC "src")
 
 # DEPENDENCIES
 set(RAYLIB_VERSION 5.5)
-find_package(raylib ${RAYLIB_VERSION} QUIET)
-if (NOT raylib_FOUND)
+option(TRIVOX_USE_SYSTEM_RAYLIB "Use an installed raylib that was built for OpenGL 4.3" OFF)
+
+if (TRIVOX_USE_SYSTEM_RAYLIB)
+    find_package(raylib ${RAYLIB_VERSION} REQUIRED)
+else()
+    set(OPENGL_VERSION "4.3" CACHE STRING "raylib OpenGL version" FORCE)
     include(FetchContent)
     set(CMAKE_TLS_VERIFY FALSE)
     FetchContent_Declare(
@@ -52,8 +60,7 @@ if (NOT raylib_FOUND)
           set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE) # don't build the supplied examples
       endif()
 endif()
-target_compile_options(raylib PUBLIC -DRAYMATH_DISABLE_CPP_OPERATORS)
-target_compile_options(raylib PUBLIC -DGRAPHICS_API_OPENGL_43)
+target_compile_definitions(TRIVOX PRIVATE RAYMATH_DISABLE_CPP_OPERATORS)
 target_link_libraries(TRIVOX PUBLIC raylib)
 
 find_package(Eigen3 CONFIG QUIET)

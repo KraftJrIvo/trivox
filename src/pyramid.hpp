@@ -4,6 +4,7 @@
 #include "config.h"
 #include "raymath.h"
 
+#include <algorithm>
 #include <array>
 
 struct Cell {
@@ -48,7 +49,7 @@ template <u8 NROOMS, u8 MIN_LVL_, u8 MAX_LVL_> class CellPyramid {
         if (x >= 0 && x < ncells && y >= 0 && y < ncells && z >= 0 && z < ncells) {
             auto otherCell = at(rid, lvl, {(u32)x, (u32)y, (u32)z});
             if (otherCell.distance < UINT32_MAX) {
-                curcell.distance = otherCell.distance + 1;
+                curcell.distance = std::min(curcell.distance, otherCell.distance + 1);
             }
         }
     }
@@ -89,4 +90,3 @@ template <u8 NROOMS, u8 MIN_LVL_, u8 MAX_LVL_> class CellPyramid {
         }
     }
 };
-    

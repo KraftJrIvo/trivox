@@ -51,6 +51,12 @@ struct ShapeMaterial {
     Matrix reflectionMat;
 };
 
+enum ShapeMaterialType : u32 {
+    SHAPE_MATERIAL_DIFFUSE = 0,
+    SHAPE_MATERIAL_EMISSIVE = 1,
+    SHAPE_MATERIAL_MIRROR = 2
+};
+
 // uvec3 x 2 : type vid0 vid1/param0 | vid2/param1 rgba matidx
 struct Shape {
     ShapeType type;

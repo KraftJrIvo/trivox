@@ -1,33 +1,19 @@
 #version 430
 
-const float EPS = 0.001;
-const uint TRIVOX_MAX_ROOMS = 16;
-const float POS_INF = 1. / 0.;
-const float NEG_INF = -1. / 0.;
-const float MIN_VSZ = 100.;
+const float PI = 3.14159265358979323846;
+const float EPS = 0.002;
+const float LIGHT_INTENSITY = 6.0;
 const int MIN_LVL = 0;
 const int MAX_LVL = 3;
-const float FOG_DIST = 100.;
-const float PI = 3.14159265358979323846;
-const vec3 FOG_COLOR = vec3(0.);
 const uint SHAPE_SPHERE = 2u;
 const uint SHAPE_QUAD = 6u;
+const uint MATERIAL_DIFFUSE = 0u;
+const uint MATERIAL_EMISSIVE = 1u;
+const uint MATERIAL_MIRROR = 2u;
 
 in vec2 fragTexCoord;
 in vec4 fragColor;
-
 out vec4 outColor;
-
-struct Room {
-    vec3 sz;
-    uint firstCellIdx;
-};
-
-struct RoomRef {
-    mat4 mat;
-    vec3 col;
-    uint idx;
-};
 
 struct Shape {
     uint type;
@@ -38,554 +24,296 @@ struct Shape {
     uint matIdx;
 };
 
-struct Cell {
-    uvec4 shids[64];
-    uint dist;
-    uint nShapes;
-};
-
-
-layout(std140, binding = 0) 
-buffer Vertices
-{
-    vec3 verts_data[];
-};
-layout(std140, binding = 1) 
-buffer Shapes
-{
-    Shape shapes_data[];
-};
-layout(std140, binding = 2) 
-buffer Rooms
-{
-    Room rooms_data[];
-};
-layout (std140, binding = 3) 
-buffer RoomRefs {
-    RoomRef roomrefs_data[];
-};
-layout (std140, binding = 4) 
-buffer Cells {
-    Cell cells_data[];
-};
-
+layout(std140, binding = 0) buffer Vertices { vec3 verts_data[]; };
+layout(std140, binding = 1) buffer Shapes { Shape shapes_data[]; };
 
 uniform vec2 RESOLUTION;
-uniform float TIME;
-
 uniform mat4 CAM_MVP;
-uniform float CAM_FOV;
 uniform vec3 CAM_POS;
-
 uniform sampler2D texture0;
 uniform sampler2D texture1;
 uniform sampler2D texture2;
-
 uniform int N_PROBE_EXTRA_LVLS;
-uniform int N_ITERS;
 uniform int LVL_0_RES;
-
-struct Sphere {
-    vec3 o;
-    float r;
-    vec3 col;
-};
-
-struct Box {
-    vec3 o;
-    mat3 rot;
-    vec3 sz;    
-};
-
-struct AAC {
-    vec3 o;
-    float side;
-};
+uniform int N_SHAPES;
 
 struct Ray {
-    vec3 o;
-    vec3 dir;
+    vec3 origin;
+    vec3 direction;
 };
 
-struct Intersection {
+struct Hit {
     bool exists;
-    vec3 o;
-    vec3 n;
-    vec3 col;
-    Ray exit;
+    float t;
+    vec3 position;
+    vec3 normal;
+    vec3 color;
+    uint material;
+    int shapeIndex;
 };
 
-
-
-Cell cell_at(uint room, uint lvl, vec3 pos) {
-    float ncells = 1 << lvl;
-    float cellsz = pow(2,float(MAX_LVL)) / ncells;
-    vec3 ipos = floor(pos / cellsz);
-    uint roomsz = (1 << (MIN_LVL * 3)) * ((1 << ((MAX_LVL - MIN_LVL + 1) * 3)) - 1) / (8 - 1);
-    uint roomoff = roomsz * room;
-    uint lvloff = uint(pow(8, MIN_LVL) * (pow(8, (lvl - 1) - MIN_LVL + 1) - 1) / (8 - 1));
-    uint celloff = uint(ncells * ncells * ipos.z + ncells * ipos.y + ipos.x);
-    return cells_data[roomoff + lvloff + celloff];
+vec2 lambertAzimuthalForward(vec3 direction) {
+    if (direction.y > 0.999999) return vec2(0.0, 1.0);
+    float denominator = max(1e-6, 1.0 - direction.y);
+    return 0.5 * sqrt(2.0 / denominator) * direction.xz;
 }
 
-vec2 lambertAzimuthalForward(vec3 p) {
-    float denom = 1.0 - p.y;
-    float factor = sqrt(2.0 / denom);
-    return 0.5 * factor * p.xz;
+vec4 sampleProbe(uint level, vec3 cell, vec3 direction) {
+    int levelSide = LVL_0_RES * (1 << N_PROBE_EXTRA_LVLS) * 8;
+    int cellSize = (1 << int(level)) * levelSide /
+                   (8 * (1 << N_PROBE_EXTRA_LVLS));
+    vec2 cellOrigin = vec2(int(level) * levelSide + cellSize * cell.x,
+                           cell.z * levelSide + cell.y * cellSize);
+
+    vec2 disk = lambertAzimuthalForward(direction);
+    float safeRadius = max(0.0, 1.0 - 1.5 / float(cellSize));
+    float diskRadius = length(disk);
+    if (diskRadius > safeRadius)
+        disk *= safeRadius / max(diskRadius, 1e-6);
+
+    vec2 localPixel = (disk + 1.0) * 0.5 * float(cellSize);
+    localPixel = clamp(localPixel, vec2(0.5), vec2(float(cellSize) - 0.5));
+    vec2 pixel = cellOrigin + localPixel;
+    return texture(texture2, pixel / vec2(textureSize(texture2, 0)));
 }
 
-vec3 lambertAzimuthalInverse(vec2 p) {
-    float rho = length(p);
-    if (rho < 1e-6) {
-        return vec3(0.0, -1.0, 0.0);
+float probeSideWeight(vec3 probePosition, vec3 surfacePosition,
+                      vec3 surfaceNormal, float cellSize) {
+    float side = dot(probePosition - surfacePosition, surfaceNormal);
+    return smoothstep(-0.15 * cellSize, 0.35 * cellSize, side);
+}
+
+vec4 interpolateProbeLevel(int level, vec3 position, vec3 normal, vec3 direction) {
+    int probeCount = 1 << ((MAX_LVL - level) + N_PROBE_EXTRA_LVLS);
+    float cellSize = 8.0 / float(probeCount);
+    vec3 probeCoordinate = position / cellSize - 0.5;
+    vec3 baseProbe = floor(probeCoordinate);
+    vec3 fraction = fract(probeCoordinate);
+
+    vec4 weightedValue = vec4(0.0);
+    float weightSum = 0.0;
+    for (int z = 0; z < 2; ++z) {
+        for (int y = 0; y < 2; ++y) {
+            for (int x = 0; x < 2; ++x) {
+                vec3 corner = vec3(x, y, z);
+                vec3 probe = clamp(baseProbe + corner,
+                                   vec3(0.0), vec3(float(probeCount - 1)));
+                vec3 axisWeight = mix(vec3(1.0) - fraction, fraction, corner);
+                float weight = axisWeight.x * axisWeight.y * axisWeight.z;
+                vec3 probePosition = (probe + 0.5) * cellSize;
+                weight *= probeSideWeight(probePosition, position, normal, cellSize);
+                weightedValue += sampleProbe(uint(level), probe, direction) * weight;
+                weightSum += weight;
+            }
+        }
     }
-    float rho2 = rho * 2.0;
-    float c = 2.0 * asin(rho2 * 0.5);
-    float sc = sin(c);
-    return vec3(
-        (p.x / rho) * sc,
-        -cos(c),
-        (p.y / rho) * sc
-    );
-}
 
-vec4 trilinear(
-    vec4 f000, vec4 f100,
-    vec4 f010, vec4 f110,
-    vec4 f001, vec4 f101,
-    vec4 f011, vec4 f111,
-    vec3 uvw
-) {
-    float u = uvw.x;
-    float v = uvw.y;
-    float w = uvw.z;
-
-    vec4 c00 = mix(f000, f100, u);
-    vec4 c10 = mix(f010, f110, u);
-    vec4 c01 = mix(f001, f101, u);
-    vec4 c11 = mix(f011, f111, u);
-
-    vec4 c0 = mix(c00, c10, v);
-    vec4 c1 = mix(c01, c11, v);
-
-    return mix(c0, c1, w);
-}
-
-vec4 getProbeVal(uint room, uint lvl, vec3 cell, vec3 dir) {
-    int lvlside = LVL_0_RES * (1 << N_PROBE_EXTRA_LVLS) * 8;
-    int roomside = (lvlside * (MAX_LVL - MIN_LVL + 1 + N_PROBE_EXTRA_LVLS));
-    int cellsz = (1 << lvl) * lvlside / 8;
-    vec2 celpos = vec2(room * roomside + lvl * lvlside + cellsz * cell.x, cell.z * lvlside + cell.y * cellsz);
-    vec2 pix = celpos + (lambertAzimuthalForward(dir) + 1.) * .5 * cellsz;
-    return texture(texture2, pix / textureSize(texture2, 0).xy);
-}
-
-vec3 getLightFrom(uint room, uint lvl, vec3 pos, vec3 dir) {
-    vec3 col = vec3(0.);
-    float alpha = 0.;
-    for (int i = MIN_LVL; i <= lvl; ++i) {
-        int n3dcells = (1 << ((MAX_LVL - i) + N_PROBE_EXTRA_LVLS));
-        float cell3dsz = 8. / float(n3dcells);
-        vec3 pf000 = clamp(floor(pos / cell3dsz - 0.5), vec3(0.), vec3(float(n3dcells - 1)));
-        vec3 pf111 = clamp(pf000 + vec3(1.), vec3(0.), vec3(float(n3dcells - 1)));
-        vec3 diff = pf111 - pf000;
-        vec3 pf100 = pf000 + vec3(diff.x, 0., 0.);
-        vec3 pf010 = pf000 + vec3(0., diff.y, 0.);
-        vec3 pf001 = pf000 + vec3(0., 0., diff.z);
-        vec3 pf110 = pf000 + vec3(diff.x, diff.y, 0.);
-        vec3 pf011 = pf000 + vec3(0., diff.y, diff.z);
-        vec3 pf101 = pf000 + vec3(diff.x, 0., diff.z);
-        vec4 f000 = getProbeVal(room, i, pf000, dir);
-        vec4 f100 = getProbeVal(room, i, pf100, dir);
-        vec4 f010 = getProbeVal(room, i, pf010, dir);
-        vec4 f001 = getProbeVal(room, i, pf001, dir);
-        vec4 f110 = getProbeVal(room, i, pf110, dir);
-        vec4 f011 = getProbeVal(room, i, pf011, dir);
-        vec4 f101 = getProbeVal(room, i, pf101, dir);
-        vec4 f111 = getProbeVal(room, i, pf111, dir);
-        vec3 uvw = ((pos / cell3dsz - 0.5) - pf000);
-        vec4 val = trilinear(f000, f100, f010, f110, f001, f101, f011, f111, uvw);
-        //vec4 val = f000;
-        //vec4 val = vec4(pf000 / 8., 1.);
-        col = mix(col, val.rgb, val.a);
-        //break;
-        alpha += val.a;
-        if (alpha >= 1.)
-            break;
+    if (weightSum < 1e-5) {
+        vec3 nearest = clamp(round(probeCoordinate),
+                             vec3(0.0), vec3(float(probeCount - 1)));
+        return sampleProbe(uint(level), nearest, direction);
     }
-    return col;
-}
-void buildOrthonormalBasis(vec3 n, out vec3 t, out vec3 b) {
-    vec3 up = (abs(n.z) < 0.999) ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
-    t = normalize(cross(up, n));
-    b = cross(n, t);
+    return weightedValue / weightSum;
 }
 
-vec3 cosineSampleHemisphere(vec3 u) {
-    float r = sqrt(u.x);
-    float theta = 2.0 * PI * fract(u.y + u.z * 0.3180339);
-    float x = r * cos(theta);
-    float y = r * sin(theta);
-    float z = sqrt(max(0.0, 1.0 - u.x));
-    return vec3(x, y, z);
-}
-
-float hash12(vec3 p) {
-    vec3 p3 = fract(p * 0.1031);
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
-}
-
-Intersection raytrace_sphere(Ray ray, Sphere sph, bool light) {
-    Intersection res; res.exists = false;
-    vec3 oc = ray.o - sph.o;
-    float r = sph.r;
-    float h = dot(oc, ray.dir); 
-    float c = dot(oc, oc) - r * r;
-    float disc = h * h - c;
-    if (disc <= 0.0) return res;
-    float t = -h - sqrt(disc);
-    if (t <= 0.0) return res;
-    res.exists = true;
-    res.o = ray.o + t * ray.dir;
-    res.n = normalize(res.o - sph.o);
-    
-    vec3 lightdir = normalize(vec3(4.0) - res.o);
-    vec3 amb = 0.1 * sph.col;
-    vec3 dif = sph.col * max(dot(lightdir, res.n), 0.0);
-    vec3 spc = vec3(pow(max(0.0, dot(reflect(-lightdir, res.n), -ray.dir)), 50.0)) * 0.33;
-
-    //vec3 amb = 0.1 * sph.col;
-    //vec3 lightdir = reflect(ray.dir, res.n);
-    //vec3 dif = sph.col * getLightFrom(0, MAX_LVL, res.o, lightdir) * max(dot(lightdir, res.n), 0.0);
-    //res.col = light ? vec3(1.) : (amb + dif);
-    
-    //res.col = amb + dif + spc;
-    //res.col = light ? vec3(1.) : getLightFrom(0, MAX_LVL, res.o, res.n);
-    //res.col = light ? getProbeVal(0, 3, vec3(0), res.n).rgb : (amb + dif + spc);
-    
-    //res.col = light ? sph.col : getLightFrom(0, MAX_LVL, res.o, res.n);
-    vec3 tt, b;
-    buildOrthonormalBasis(res.n, tt, b);
-    vec3 accum = vec3(0.0);
-    vec3 seed = floor((res.o - sph.o) * 0.005 + 0.5);
-    for (int i = 0; i < 8; ++i) {
-        float jx = hash12(seed + vec3(float(i), 0.0, 0.0));
-        float jy = hash12(seed + vec3(0.0, float(i), 0.0));
-        float jz = hash12(seed + vec3(0.0, 0.0, float(i)));
-        vec3 d = cosineSampleHemisphere(vec3(jx, jy, jz));
-        vec3 w = normalize(tt * d.x + b * d.y + res.n * d.z);
-        accum += getLightFrom(0, 0, res.o, w);
+vec3 sampleIndirectRay(vec3 position, vec3 normal, vec3 direction) {
+    vec3 radiance = vec3(0.0);
+    float opacity = 0.0;
+    for (int level = MIN_LVL; level <= MAX_LVL; ++level) {
+        vec4 segment = interpolateProbeLevel(level, position, normal, direction);
+        radiance += (1.0 - opacity) * segment.rgb;
+        opacity += (1.0 - opacity) * segment.a;
+        if (opacity >= 0.999) break;
     }
-    vec3 irradiance = accum * (PI / 8.0);
-    vec3 diffuse = sph.col * irradiance;
-    vec3 refl = reflect(-ray.dir, res.n);
-    vec3 specular = getLightFrom(0, 0, res.o, refl) * 0.25;
-    res.col = light ? sph.col : (diffuse);
-    
-    return res;
+    return radiance;
 }
 
-Intersection raytrace_quad(Ray ray, vec3 v0, vec3 v1, vec3 v2, vec3 col, bool light) {
-    Intersection res; res.exists = false;
+void buildBasis(vec3 normal, out vec3 tangent, out vec3 bitangent) {
+    vec3 up = (abs(normal.z) < 0.999) ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+    tangent = normalize(cross(up, normal));
+    bitangent = cross(normal, tangent);
+}
+
+vec3 cosineHemisphere(vec2 u) {
+    float radius = sqrt(u.x);
+    float angle = 2.0 * PI * u.y;
+    return vec3(radius * cos(angle), radius * sin(angle), sqrt(max(0.0, 1.0 - u.x)));
+}
+
+bool intersectSphere(Ray ray, vec3 center, float radius, out float t, out vec3 normal) {
+    vec3 oc = ray.origin - center;
+    float h = dot(oc, ray.direction);
+    float discriminant = h * h - (dot(oc, oc) - radius * radius);
+    if (discriminant <= 0.0) return false;
+    float root = sqrt(discriminant);
+    t = -h - root;
+    if (t <= EPS) t = -h + root;
+    if (t <= EPS) return false;
+    normal = normalize(ray.origin + ray.direction * t - center);
+    if (dot(normal, ray.direction) > 0.0) normal = -normal;
+    return true;
+}
+
+bool intersectQuad(Ray ray, vec3 v0, vec3 v1, vec3 v2, out float t, out vec3 normal) {
     vec3 v3 = v0 + v2 - v1;
-    vec3 n = normalize(cross(v1 - v0, v2 - v1));
-    float denom = dot(ray.dir, n);
-    if (abs(denom) < EPS) return res;
-    float t = dot(v0 - ray.o, n) / denom;
-    if (t <= EPS) return res;
+    vec3 geometricNormal = normalize(cross(v1 - v0, v2 - v1));
+    float denominator = dot(ray.direction, geometricNormal);
+    if (abs(denominator) < EPS) return false;
+    t = dot(v0 - ray.origin, geometricNormal) / denominator;
+    if (t <= EPS) return false;
 
-    vec3 p = ray.o + t * ray.dir;
+    vec3 position = ray.origin + ray.direction * t;
     vec3 edges[4] = vec3[4](v1 - v0, v2 - v1, v3 - v2, v0 - v3);
-    vec3 verts[4] = vec3[4](v0, v1, v2, v3);
-    float sign = dot(cross(edges[0], p - verts[0]), n);
-    for (int i = 1; i < 4; ++i) {
-        float s = dot(cross(edges[i], p - verts[i]), n);
-        if (sign * s < 0.0) return res;
+    vec3 vertices[4] = vec3[4](v0, v1, v2, v3);
+    bool hasPositive = false;
+    bool hasNegative = false;
+    for (int i = 0; i < 4; ++i) {
+        float side = dot(cross(edges[i], position - vertices[i]), geometricNormal);
+        hasPositive = hasPositive || side > EPS;
+        hasNegative = hasNegative || side < -EPS;
     }
-
-    res.exists = true;
-    res.o = p;
-    res.n = (denom < 0.0) ? n : -n;
-
-    vec3 tt, b;
-    buildOrthonormalBasis(res.n, tt, b);
-    vec3 accum = vec3(0.0);
-    vec3 seed = floor(p * 0.005 + 0.5);
-    for (int i = 0; i < 8; ++i) {
-        float jx = hash12(seed + vec3(float(i), 0.0, 0.0));
-        float jy = hash12(seed + vec3(0.0, float(i), 0.0));
-        float jz = hash12(seed + vec3(0.0, 0.0, float(i)));
-        vec3 d = cosineSampleHemisphere(vec3(jx, jy, jz));
-        vec3 w = normalize(tt * d.x + b * d.y + res.n * d.z);
-        accum += getLightFrom(0, 0, p, w);
-    }
-    vec3 irradiance = accum * (PI / 8.0);
-    vec3 diffuse = col * irradiance;
-    res.col = light ? col : diffuse;
-
-    return res;
+    if (hasPositive && hasNegative) return false;
+    normal = (denominator < 0.0) ? geometricNormal : -geometricNormal;
+    return true;
 }
 
-Intersection raytrace_box(Ray ray, Box box) {
-    Intersection result;
-    result.exists = false;
-    Ray lray = Ray((ray.o - box.o) * box.rot, ray.dir * box.rot);
-    vec3 tMin = -lray.o / lray.dir;
-    vec3 tMax = (box.sz - lray.o) / lray.dir;
-    vec3 t1 = min(tMin, tMax);
-    vec3 t2 = max(tMin, tMax);
-    float tNear = max(max(t1.x, t1.y), t1.z);
-    float tFar = min(min(t2.x, t2.y), t2.z);
-    bool inside = all(greaterThanEqual(lray.o, vec3(0.))) && all(lessThanEqual(lray.o, box.sz));
-    if (inside || (tNear <= tFar && tNear >= 0.)) {
-        result.exists = true;
-        vec3 localPos = lray.o + lray.dir * tNear;
-        result.o = box.rot * localPos + box.o;
-        vec3 locn = vec3(0.0);
-        float epsilon = 0.001;
-        if (abs(localPos.x) < epsilon) locn.x = -1.;
-        else if (abs(localPos.x - box.sz.x) < epsilon) locn.x = 1.;
-        else if (abs(localPos.y) < epsilon) locn.y = -1.;
-        else if (abs(localPos.y - box.sz.y) < epsilon) locn.y = 1.;
-        else if (abs(localPos.z) < epsilon) locn.z = -1.;
-        else if (abs(localPos.z - box.sz.z) < epsilon) locn.z = 1.;
-        result.n = box.rot * locn;
-        vec3 localExit = lray.o + lray.dir * tFar;
-        result.exit = Ray(box.rot * localExit + box.o, ray.dir);
-        if (inside)
-            result.o = ray.o;
-    }
-    return result;
-}
+Hit traceScene(Ray ray, float maximumDistance, int ignoredShape) {
+    Hit best;
+    best.exists = false;
+    best.t = maximumDistance;
+    best.position = vec3(0.0);
+    best.normal = vec3(0.0, 1.0, 0.0);
+    best.color = vec3(0.0);
+    best.material = MATERIAL_DIFFUSE;
+    best.shapeIndex = -1;
 
-Intersection raytrace_aac(Ray ray, AAC aac) {
-    vec3 tmin = (aac.o - ray.o) / ray.dir;
-    vec3 tmax = (aac.o + vec3(aac.side) - ray.o) / ray.dir;
-    vec3 t1 = min(tmin, tmax);
-    vec3 t2 = max(tmin, tmax);
-    float t_near = max(max(t1.x, t1.y), t1.z);
-    float t_far = min(min(t2.x, t2.y), t2.z);
-    Intersection result;
-    result.exists = false;
-    bool inside = (ray.o.x >= aac.o.x && ray.o.x <= aac.o.x + aac.side &&
-                ray.o.y >= aac.o.y && ray.o.y <= aac.o.y + aac.side &&
-                ray.o.z >= aac.o.z && ray.o.z <= aac.o.z + aac.side);
-    if (inside || (t_near <= t_far && t_near > 0.0)) {
-        result.exists = true;
-        result.o = ray.o + t_near * ray.dir;
-        vec3 pos = result.o - aac.o;
-        vec3 half_side = vec3(aac.side * 0.5);
-        vec3 n = vec3(0.0);
-        if (abs(pos.x) < 0.001) n = vec3(-1.0, 0.0, 0.0);
-        else if (abs(pos.x - aac.side) < 0.001) n = vec3(1.0, 0.0, 0.0);
-        else if (abs(pos.y) < 0.001) n = vec3(0.0, -1.0, 0.0);
-        else if (abs(pos.y - aac.side) < 0.001) n = vec3(0.0, 1.0, 0.0);
-        else if (abs(pos.z) < 0.001) n = vec3(0.0, 0.0, -1.0);
-        else if (abs(pos.z - aac.side) < 0.001) n = vec3(0.0, 0.0, 1.0);
-        result.n = n;
-        result.col = vec3(1.0);
-        result.exit = Ray(ray.o + t_far * ray.dir, ray.dir);
-    }
-    
-    return result;
-}
-
-vec3 minIndicator(vec3 v) {
-    float minVal = min(min(v.x, v.y), v.z);
-    return vec3(
-        step(minVal, v.x) * step(v.x, minVal),
-        step(minVal, v.y) * step(v.y, minVal),
-        step(minVal, v.z) * step(v.z, minVal)
-    );
-}
-
-float minval3(vec3 v) {
-    return min(v.x, min(v.y, v.z));
-}
-
-Intersection raytrace_room(uint rid, Ray lray, vec3 lcampos, float max_dist) {
-    Intersection res;
-    res.exists = false;
-
-    Room r = rooms_data[rid];
-    bool inside = all(greaterThanEqual(lray.o, vec3(0.))) && all(lessThanEqual(lray.o, r.sz));
-
-    bool first = true;
-    vec3 start = lray.o;
-
-    while (inside) {
-        float lvl, csz, vsz;
-        vec3 cellc;
-        for (int i = MAX_LVL; i >= MIN_LVL; --i) {
-            csz = pow(2, i);
-            cellc = floor(lray.o / csz) * csz + vec3(.5) * csz;
-            vsz = (2. * atan((csz * .5) / length(cellc - lcampos))) * RESOLUTION.y;
-            if (i == MIN_LVL || vsz < MIN_VSZ) {
-                lvl = float(i);
-                break;
-            }
-        }
-        float ncells = pow(2, MAX_LVL) / csz;
-
-        Cell cell = cell_at(rid, uint(MAX_LVL - lvl), lray.o);
-
-        //AAC aac = AAC(floor(lray.o / csz) * csz, csz);
-
-        vec3 curcell = floor(lray.o / csz);
-        int celrad = max(int(cell.dist) - 1, 0);
-        vec3 startC = clamp(vec3(curcell - celrad), vec3(0.), vec3(ncells - 1.));
-        vec3 endC = clamp(vec3(curcell + celrad), vec3(0.), vec3(ncells - 1.));
-        AAC aac = AAC(startC * csz, minval3(endC - startC + 1) * csz);
-
-        res = raytrace_aac(lray, aac);
-        res.exists = false;
-
-        Intersection bestres = res;
-        bestres.exists = false;
-        float besdist = length(res.exit.o - lray.o) + EPS;
-
-        if (cell.dist == 0) {
-            for (int i = 0; i < cell.nShapes; ++i) {
-                Shape shape = shapes_data[cell.shids[i / 4][i % 4]];
-                if (shape.type == SHAPE_SPHERE) {
-                    vec3 center = verts_data[shape.vid0];
-                    vec3 params = verts_data[shape.vid1];
-                    Sphere sph = Sphere(center, params[0], shape.col);
-                    res = raytrace_sphere(lray, sph, shape.matIdx == 1);
-                } else if (shape.type == SHAPE_QUAD) {
-                    vec3 v0 = verts_data[shape.vid0];
-                    vec3 v1 = verts_data[shape.vid1];
-                    vec3 v2 = verts_data[shape.vid2];
-                    res = raytrace_quad(lray, v0, v1, v2, shape.col, shape.matIdx == 1);
-                } else {
-                    res.exists = false;
-                }
-                if (res.exists) {
-                    float dist = length(res.o - lray.o);
-                    if (dist < besdist) {
-                        bestres = res;
-                        besdist = dist;
-                    }
-                }
-            }
-            res = bestres;
+    for (int i = 0; i < N_SHAPES; ++i) {
+        if (i == ignoredShape) continue;
+        Shape shape = shapes_data[i];
+        float t = maximumDistance;
+        vec3 normal = vec3(0.0);
+        bool exists = false;
+        if (shape.type == SHAPE_SPHERE) {
+            exists = intersectSphere(ray, verts_data[shape.vid0], verts_data[shape.vid1].x, t, normal);
+        } else if (shape.type == SHAPE_QUAD) {
+            exists = intersectQuad(ray, verts_data[shape.vid0], verts_data[shape.vid1],
+                                   verts_data[shape.vid2], t, normal);
         }
 
-
-        if (res.exists) {            
-            if (length(res.o - start) > max_dist)
-                res.exists = false;
-            return res;
-        } else {         
-            if (length(res.exit.o - start) > max_dist) {
-                res.exists = false;   
-                break;
-            }
-            lray.o = res.exit.o + res.exit.dir * EPS;
-            inside = all(greaterThanEqual(lray.o, vec3(0.))) && all(lessThan(lray.o, r.sz));
-            res.exists = false;
+        if (exists && t < best.t && t < maximumDistance) {
+            best.exists = true;
+            best.t = t;
+            best.position = ray.origin + ray.direction * t;
+            best.normal = normal;
+            best.color = shape.col;
+            best.material = shape.matIdx;
+            best.shapeIndex = i;
         }
     }
-
-    return res;
+    return best;
 }
 
-Intersection raytrace_rooms(Ray ray, float max_dist) 
-{
-    vec3 start = ray.o;
-    bool first = true;
-    bool hit = false;
-    float path = 0.;
-    Intersection last;
-    Intersection closest;
-    uint rridx = 0;
-    uint lastRridx = 0;
-    Box closestBox;
+vec3 directIrradiance(Hit surface) {
+    const int SHADOW_SAMPLES = 4;
+    const float GOLDEN_RATIO_CONJUGATE = 0.61803398875;
+    vec3 irradiance = vec3(0.0);
+    for (int i = 0; i < N_SHAPES; ++i) {
+        Shape light = shapes_data[i];
+        if (light.matIdx != MATERIAL_EMISSIVE || light.type != SHAPE_SPHERE) continue;
 
-    closest.col = vec3(0.);
-
-    while ((first || closest.exists) && (path < FOG_DIST)) 
-    {
-        float minDist = POS_INF;
-        closest.exists = false;
-
-        for (int i = 0; i < TRIVOX_MAX_ROOMS; ++i) 
-        {
-            RoomRef rr = roomrefs_data[i];
-
-            if ((rr.idx == 0) || (!first && lastRridx == i))
-                continue;
-
-            Room r = rooms_data[rr.idx - 1];
-            Box box = Box(rr.mat[3].xyz, mat3(rr.mat), r.sz);
-            Intersection inter = raytrace_box(ray, box);
-
-            if (inter.exists) {
-                float dist = length(inter.o - ray.o);
-                if (dist < minDist) {
-                    minDist = dist;
-                    closest = inter;
-                    rridx = i;
-                    closestBox = box;
-                }
-            }
+        vec3 center = verts_data[light.vid0];
+        float radius = verts_data[light.vid1].x;
+        vec3 toCenter = center - surface.position;
+        float distanceSquared = dot(toCenter, toCenter);
+        if (distanceSquared <= radius * radius + EPS) continue;
+        float distanceToCenter = sqrt(distanceSquared);
+        vec3 coneAxis = toCenter / distanceToCenter;
+        float sinSquared = clamp(radius * radius / distanceSquared, 0.0, 0.9999);
+        float cosThetaMax = sqrt(1.0 - sinSquared);
+        float solidAngle = 2.0 * PI * (1.0 - cosThetaMax);
+        vec3 tangent, bitangent;
+        buildBasis(coneAxis, tangent, bitangent);
+        float visibleCosine = 0.0;
+        for (int sampleIndex = 0; sampleIndex < SHADOW_SAMPLES; ++sampleIndex) {
+            vec2 sampleValue = vec2((float(sampleIndex) + 0.5) / float(SHADOW_SAMPLES),
+                                    fract((float(sampleIndex) + 0.5) * GOLDEN_RATIO_CONJUGATE));
+            float cosTheta = mix(1.0, cosThetaMax, sampleValue.x);
+            float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+            float phi = 2.0 * PI * sampleValue.y;
+            vec3 direction = normalize(tangent * (cos(phi) * sinTheta) +
+                                       bitangent * (sin(phi) * sinTheta) +
+                                       coneAxis * cosTheta);
+            float cosine = max(dot(surface.normal, direction), 0.0);
+            if (cosine <= 0.0) continue;
+            Ray shadowRay = Ray(surface.position + surface.normal * (4.0 * EPS), direction);
+            Hit blocker = traceScene(shadowRay, 1000.0, -1);
+            if (blocker.exists && blocker.shapeIndex == i)
+                visibleCosine += cosine;
         }
-
-        if (closest.exists) {
-            lastRridx = rridx;
-            path += length(ray.o - closest.o);
-            if (path > max_dist) break;
-            ray.o = closest.o;
-            
-            uint rid = roomrefs_data[rridx].idx - 1;
-            Ray lray = Ray(clamp((ray.o - closestBox.o) * closestBox.rot, vec3(EPS), rooms_data[rid].sz - EPS), ray.dir * closestBox.rot);
-            vec3 lcampos = (CAM_POS - closestBox.o) * closestBox.rot;
-            Intersection local = raytrace_room(rid, lray, lcampos, max_dist - path);
-
-            if (local.exists) {
-                local.o = closestBox.rot * local.o + closestBox.o;
-                path += length(ray.o - local.o);
-                closest = local;
-                if (path < max_dist) hit = true;
-                break;
-            } else {
-                path += length(ray.o - closest.exit.o);
-                if (path > max_dist) break;
-            }
-            
-            ray = closest.exit;
-        }
-
-        first = false;
+        irradiance += light.col * LIGHT_INTENSITY * (solidAngle / PI) *
+                      (visibleCosine / float(SHADOW_SAMPLES));
     }
-
-    if (!hit)
-        path = FOG_DIST;
-
-    closest.col = mix(closest.col + EPS, FOG_COLOR, clamp(path / FOG_DIST, .001, 1.));
-
-    return closest;
+    return irradiance;
 }
 
-void main() 
-{
-    vec3 start = CAM_POS;
-    vec2 coeffs = (gl_FragCoord.xy - RESOLUTION * .5) / (RESOLUTION.y * .5);
-    vec4 dirw = CAM_MVP * vec4(coeffs.x, coeffs.y, 1.0, 1.0);
-    vec3 dir = normalize(dirw.xyz/dirw.w - start);
-    vec3 col = texture(texture0, fragTexCoord).rgb;
+vec3 indirectIrradiance(Hit surface) {
+    const int SAMPLE_COUNT = 8;
+    const float GOLDEN_RATIO_CONJUGATE = 0.61803398875;
+    vec3 tangent, bitangent;
+    buildBasis(surface.normal, tangent, bitangent);
+    vec3 accumulated = vec3(0.0);
+    for (int i = 0; i < SAMPLE_COUNT; ++i) {
+        vec2 xi = vec2((float(i) + 0.5) / float(SAMPLE_COUNT),
+                       fract((float(i) + 0.5) * GOLDEN_RATIO_CONJUGATE));
+        vec3 localDirection = cosineHemisphere(xi);
+        vec3 direction = normalize(tangent * localDirection.x +
+                                   bitangent * localDirection.y +
+                                   surface.normal * localDirection.z);
+        accumulated += sampleIndirectRay(surface.position + surface.normal * (4.0 * EPS),
+                                         surface.normal, direction);
+    }
+    return accumulated / float(SAMPLE_COUNT);
+}
 
-    Ray ray = Ray(start, dir);
+vec3 shadeDiffuse(Hit surface) {
+    return surface.color * (directIrradiance(surface) + indirectIrradiance(surface));
+}
 
-    Intersection inter = raytrace_rooms(ray, FOG_DIST);
+vec3 traceCameraPath(Ray ray) {
+    vec3 throughput = vec3(1.0);
+    for (int specularDepth = 0; specularDepth < 3; ++specularDepth) {
+        Hit hit = traceScene(ray, 1000.0, -1);
+        if (!hit.exists) return vec3(0.0);
+        if (hit.material == MATERIAL_EMISSIVE)
+            return throughput * hit.color * LIGHT_INTENSITY;
+        if (hit.material == MATERIAL_MIRROR) {
+            throughput *= hit.color;
+            vec3 reflected = normalize(reflect(ray.direction, hit.normal));
+            ray = Ray(hit.position + hit.normal * (4.0 * EPS), reflected);
+            continue;
+        }
+        return throughput * shadeDiffuse(hit);
+    }
+    return vec3(0.0);
+}
 
-    vec3 frontCol = texture(texture1, fragTexCoord).rgb;
-    if (length(frontCol) != 0)
-        outColor = vec4(frontCol, 1.0);        
-    else if (length(inter.col) == 0)
-        outColor = vec4(col, 1.0);
-    else
-        outColor = vec4(inter.col, 1.0);
-        
+vec3 acesFilm(vec3 color) {
+    return clamp((color * (2.51 * color + 0.03)) /
+                 (color * (2.43 * color + 0.59) + 0.14), 0.0, 1.0);
+}
+
+void main() {
+    vec2 coefficients = (gl_FragCoord.xy - RESOLUTION * 0.5) / (RESOLUTION.y * 0.5);
+    vec4 worldPoint = CAM_MVP * vec4(coefficients.x, coefficients.y, 1.0, 1.0);
+    vec3 direction = normalize(worldPoint.xyz / worldPoint.w - CAM_POS);
+    vec3 linearColor = traceCameraPath(Ray(CAM_POS, direction));
+
+    vec3 frontColor = texture(texture1, fragTexCoord).rgb;
+    if (length(frontColor) > 0.0) {
+        outColor = vec4(frontColor, 1.0);
+    } else if (length(linearColor) > 0.0) {
+        outColor = vec4(pow(acesFilm(max(linearColor, vec3(0.0))), vec3(1.0 / 2.2)), 1.0);
+    } else {
+        outColor = vec4(texture(texture0, fragTexCoord).rgb, 1.0);
+    }
 }

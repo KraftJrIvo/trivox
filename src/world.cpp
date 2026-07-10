@@ -2,8 +2,6 @@
 #include "entity.hpp"
 #include "shape.h"
 
-#include <map>
-
 class WorldImpl : public World {
     u64 _addRoom(const Room& room);
     u64 _addRoomRef(u8 rid, const mat4& matrix);
@@ -41,23 +39,17 @@ class WorldImpl : public World {
     void WorldImpl::_fillCells() {
         for (u32 eid = 0; eid < _state.entities.count(); ++eid) {
             auto& ent = _state.entities.at(eid);
-            std::unordered_map<u8, bool> roomRefDone;
+            auto& rr = _state.roomRefs.at(ent.rrid);
             for (u8 lvl = _cells.MIN_LVL; lvl <= _cells.MAX_LVL; ++lvl) {
                 for (u32 shid = ent.firstShapeIdx[lvl];
                     shid < ent.firstShapeIdx[lvl] + ent.nShapes(lvl); ++shid) {
-                        auto& shape = _state.shapes.at(shid);
-                        for (int rrid = 0; rrid < _state.roomRefs.count(); ++rrid) {
-                            if (!roomRefDone.count(rrid)) {
-                                auto& rr = _state.roomRefs.at(rrid);
-                                _fillRoomWithShapeIfInside(lvl, shape, shid, rr);
-                                roomRefDone[rr.idx] = true;
-                            }
-                        }
-                    }
+                    auto& shape = _state.shapes.at(shid);
+                    _fillRoomWithShapeIfInside(lvl, shape, shid, rr);
                 }
             }
         }
-        
+    }
+
         void WorldImpl::_fillRoomWithShapeIfInside(u8 lvl, const Shape& shape, u32 shid, const RoomRef& rr) {
             mat4 matrix = rr.matrix();
             std::array<vec3, 3> vs;
@@ -106,52 +98,71 @@ class WorldImpl : public World {
             mat4 mat = mat4::Identity();
             mat.POSVEC += vec3{0, 0, 0};
             auto rrid0 = _addRoomRef(rid, mat);
-            mat = mat4::Identity();
-            mat.POSVEC += vec3{20, 20, 20};
-            auto rrid1 = _addRoomRef(rid, mat);
-            mat = mat4::Identity();
-            mat.ROTMAT = Eigen::AngleAxisf(-PI / 8.f, vec3{1.0f, 0.0f, 0}).matrix() *
-            Eigen::AngleAxisf(PI / 4.f, vec3{0, 1.0f, 0}).matrix();
-            mat.POSVEC += vec3{8, 0, 0};
-            auto rrid2 = _addRoomRef(rid, mat);
             _state.roomRefs.at(0).color = vec3{1.0, 0, 0};
-            _state.roomRefs.at(1).color = vec3{1.0, 1.0, 0};
-            _state.roomRefs.at(2).color = vec3{0, 0, 1.0};
             
             //for (int i = 0; i < 100; ++i)
             //    auto eid = _addEntity(rrid0, EntityType::BOUNCE_BALL, {RAND_FLOAT * 6 + 1, RAND_FLOAT * 6 + 1, RAND_FLOAT * 6 + 1});
-            float radii[TRIVOX_ENTITY_MAX_PARAMS] = {0.5f};
-            auto eid = _addEntity(rrid0, EntityType::BOUNCE_BALL, {4, 4, 4}, radii);
+            float radii[TRIVOX_ENTITY_MAX_PARAMS] = {1.15f};
+            auto eid = _addEntity(rrid0, EntityType::BOUNCE_BALL, {5.2f, 1.15f, 4.8f}, radii);
+            auto& mirror = _state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]);
+            mirror.materialIdx = SHAPE_MATERIAL_MIRROR;
+            mirror.color = {1.0f, 1.0f, 1.0f};
+
+            radii[0] = 0.9f;
+            eid = _addEntity(rrid0, EntityType::BOUNCE_BALL, {2.4f, 0.9f, 4.0f}, radii);
+            auto& matteBall = _state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]);
+            matteBall.materialIdx = SHAPE_MATERIAL_DIFFUSE;
+            matteBall.color = {0.58f, 0.62f, 0.72f};
+
             radii[0] = 0.25f;
-            //_state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]).materialIdx = 1;
             for (int x = -1; x <= 1; x += 2) {
                 for (int y = -1; y <= 1; y += 2) {
                     for (int z = -1; z <= 1; z += 2) {
                         auto eid = _addEntity(rrid0, EntityType::BOUNCE_BALL, {4.0f + x * 1.5f, 4.0f + y * 1.5f, 4.0f + z * 1.5f}, radii);
-                        _state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]).materialIdx = 1;
-                        _state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]).color = {float((x + 1) / 2), float((y + 1) / 2), float((z + 1) / 2)};
+                        auto& shape = _state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]);
+                        const bool warmLight = (x == -1 && y == 1 && z == -1);
+                        const bool coolLight = (x == 1 && y == 1 && z == 1);
+                        shape.materialIdx = (warmLight || coolLight)
+                            ? SHAPE_MATERIAL_EMISSIVE
+                            : SHAPE_MATERIAL_DIFFUSE;
+                        shape.color = warmLight
+                            ? vec3{1.0f, 0.55f, 0.2f}
+                            : coolLight
+                                ? vec3{0.35f, 0.65f, 1.0f}
+                                : vec3{
+                                    0.05f + 0.95f * float((x + 1) / 2),
+                                    0.05f + 0.95f * float((y + 1) / 2),
+                                    0.05f + 0.95f * float((z + 1) / 2)
+                                };
                     }
                 }
             }
 
             float params[TRIVOX_ENTITY_MAX_PARAMS] = {1, 0, 0, 4};
             eid = _addEntity(rrid0, EntityType::PLANE, {0.001f, 4, 4}, params);
+            _state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]).color = {0.75f, 0.12f, 0.08f};
             params[1] = 1; params[0] = 0; 
             eid = _addEntity(rrid0, EntityType::PLANE, {4, 0.001f, 4}, params);
+            _state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]).color = {0.78f, 0.78f, 0.78f};
             params[2] = -1; params[1] = 0; 
             eid = _addEntity(rrid0, EntityType::PLANE, {4, 4, 8.0f - 0.001f}, params);
+            _state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]).color = {0.78f, 0.78f, 0.78f};
+            params[0] = -1; params[2] = 0;
+            eid = _addEntity(rrid0, EntityType::PLANE, {8.0f - 0.001f, 4, 4}, params);
+            _state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]).color = {0.08f, 0.65f, 0.12f};
+            params[1] = -1; params[0] = 0;
+            eid = _addEntity(rrid0, EntityType::PLANE, {4, 8.0f - 0.001f, 4}, params);
+            _state.shapes.at(_state.entities.at(eid).firstShapeIdx[0]).color = {0.78f, 0.78f, 0.78f};
         }
         
         void WorldImpl::update(float delta) {
             for (u8 i = 0; i < _state.entities.count(); ++i)
                 _state.entities.at(i).update(&_state, delta);
-            
-            _cells.clear();
-            _fillCells();
-            _fillCellDistances();
+
+            // The active shaders traverse the small shape array directly. Rebuilding
+            // the unused cell pyramid every frame only adds CPU work.
         }
-        
+
         World::Ptr World::create(const WorldConfig& cfg) {
             return std::shared_ptr<World>(new WorldImpl(cfg));
         }
-                    
