@@ -36,6 +36,13 @@ uniform sampler2D texture2;
 uniform int N_PROBE_EXTRA_LVLS;
 uniform int LVL_0_RES;
 uniform int N_SHAPES;
+uniform int SHADOW_SAMPLE_COUNT;
+uniform int INDIRECT_SAMPLE_COUNT;
+uniform int SAMPLE_FRAME_INDEX;
+uniform float TEMPORAL_BLEND;
+uniform int STOCHASTIC_SAMPLING_ENABLED;
+uniform int CORNER_MERGE_ENABLED;
+uniform sampler2D texture3;
 
 struct Ray {
     vec3 origin;
@@ -128,6 +135,55 @@ vec3 sampleIndirectRay(vec3 position, vec3 normal, vec3 direction) {
     return radiance;
 }
 
+vec3 sampleIndirectRayCornerMerged(vec3 position, vec3 normal, vec3 direction) {
+    int probeCount = 1 << ((MAX_LVL - MIN_LVL) + N_PROBE_EXTRA_LVLS);
+    float cellSize = 8.0 / float(probeCount);
+    vec3 probeCoordinate = position / cellSize - 0.5;
+    vec3 baseProbe = floor(probeCoordinate);
+    vec3 fraction = fract(probeCoordinate);
+    vec3 weightedRadiance = vec3(0.0);
+    float weightSum = 0.0;
+
+    for (int z = 0; z < 2; ++z) {
+        for (int y = 0; y < 2; ++y) {
+            for (int x = 0; x < 2; ++x) {
+                vec3 corner = vec3(x, y, z);
+                vec3 probe = clamp(baseProbe + corner,
+                                   vec3(0.0), vec3(float(probeCount - 1)));
+                vec3 axisWeight = mix(vec3(1.0) - fraction, fraction, corner);
+                float weight = axisWeight.x * axisWeight.y * axisWeight.z;
+                vec3 probePosition = (probe + 0.5) * cellSize;
+                weight *= probeSideWeight(probePosition, position, normal, cellSize);
+
+                vec4 nearSegment = sampleProbe(uint(MIN_LVL), probe, direction);
+                vec3 radiance = nearSegment.rgb;
+                float opacity = nearSegment.a;
+                for (int level = MIN_LVL + 1; level <= MAX_LVL; ++level) {
+                    // Merge this corner's path before trilinearly averaging the result.
+                    vec4 farSegment = interpolateProbeLevel(level, probePosition, normal, direction);
+                    radiance += (1.0 - opacity) * farSegment.rgb;
+                    opacity += (1.0 - opacity) * farSegment.a;
+                    if (opacity >= 0.999) break;
+                }
+                weightedRadiance += radiance * weight;
+                weightSum += weight;
+            }
+        }
+    }
+    if (weightSum < 1e-5)
+        return sampleIndirectRay(position, normal, direction);
+    return weightedRadiance / weightSum;
+}
+
+float worldSpaceHash(vec3 position, float salt) {
+    // Quantization keeps the seed stable under tiny reconstruction differences while
+    // remaining fine enough not to expose an obvious grid at normal viewing distances.
+    vec3 cell = floor(position * 64.0);
+    cell = fract(cell * vec3(0.1031, 0.1030, 0.0973));
+    cell += dot(cell, cell.yzx + 33.33 + salt);
+    return fract((cell.x + cell.y) * cell.z);
+}
+
 void buildBasis(vec3 normal, out vec3 tangent, out vec3 bitangent) {
     vec3 up = (abs(normal.z) < 0.999) ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
     tangent = normalize(cross(up, normal));
@@ -214,7 +270,6 @@ Hit traceScene(Ray ray, float maximumDistance, int ignoredShape) {
 }
 
 vec3 directIrradiance(Hit surface) {
-    const int SHADOW_SAMPLES = 4;
     const float GOLDEN_RATIO_CONJUGATE = 0.61803398875;
     vec3 irradiance = vec3(0.0);
     for (int i = 0; i < N_SHAPES; ++i) {
@@ -234,9 +289,15 @@ vec3 directIrradiance(Hit surface) {
         vec3 tangent, bitangent;
         buildBasis(coneAxis, tangent, bitangent);
         float visibleCosine = 0.0;
-        for (int sampleIndex = 0; sampleIndex < SHADOW_SAMPLES; ++sampleIndex) {
-            vec2 sampleValue = vec2((float(sampleIndex) + 0.5) / float(SHADOW_SAMPLES),
-                                    fract((float(sampleIndex) + 0.5) * GOLDEN_RATIO_CONJUGATE));
+        vec2 sequenceRotation = STOCHASTIC_SAMPLING_ENABLED != 0
+            ? vec2(
+                worldSpaceHash(surface.position, float(SAMPLE_FRAME_INDEX) * 17.0 + float(i) * 3.0),
+                worldSpaceHash(surface.position.zyx, float(SAMPLE_FRAME_INDEX) * 29.0 + float(i) * 7.0))
+            : vec2(0.0);
+        for (int sampleIndex = 0; sampleIndex < SHADOW_SAMPLE_COUNT; ++sampleIndex) {
+            vec2 sampleValue = fract(vec2(
+                (float(sampleIndex) + 0.5) / float(SHADOW_SAMPLE_COUNT),
+                (float(sampleIndex) + 0.5) * GOLDEN_RATIO_CONJUGATE) + sequenceRotation);
             float cosTheta = mix(1.0, cosThetaMax, sampleValue.x);
             float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
             float phi = 2.0 * PI * sampleValue.y;
@@ -251,28 +312,34 @@ vec3 directIrradiance(Hit surface) {
                 visibleCosine += cosine;
         }
         irradiance += light.col * LIGHT_INTENSITY * (solidAngle / PI) *
-                      (visibleCosine / float(SHADOW_SAMPLES));
+                      (visibleCosine / float(SHADOW_SAMPLE_COUNT));
     }
     return irradiance;
 }
 
 vec3 indirectIrradiance(Hit surface) {
-    const int SAMPLE_COUNT = 8;
     const float GOLDEN_RATIO_CONJUGATE = 0.61803398875;
     vec3 tangent, bitangent;
     buildBasis(surface.normal, tangent, bitangent);
     vec3 accumulated = vec3(0.0);
-    for (int i = 0; i < SAMPLE_COUNT; ++i) {
-        vec2 xi = vec2((float(i) + 0.5) / float(SAMPLE_COUNT),
-                       fract((float(i) + 0.5) * GOLDEN_RATIO_CONJUGATE));
+    vec2 sequenceRotation = STOCHASTIC_SAMPLING_ENABLED != 0
+        ? vec2(
+            worldSpaceHash(surface.position, float(SAMPLE_FRAME_INDEX) * 11.0 + 5.0),
+            worldSpaceHash(surface.position.zyx, float(SAMPLE_FRAME_INDEX) * 23.0 + 9.0))
+        : vec2(0.0);
+    for (int i = 0; i < INDIRECT_SAMPLE_COUNT; ++i) {
+        vec2 xi = fract(vec2((float(i) + 0.5) / float(INDIRECT_SAMPLE_COUNT),
+                             (float(i) + 0.5) * GOLDEN_RATIO_CONJUGATE) + sequenceRotation);
         vec3 localDirection = cosineHemisphere(xi);
         vec3 direction = normalize(tangent * localDirection.x +
                                    bitangent * localDirection.y +
                                    surface.normal * localDirection.z);
-        accumulated += sampleIndirectRay(surface.position + surface.normal * (4.0 * EPS),
-                                         surface.normal, direction);
+        vec3 samplePosition = surface.position + surface.normal * (4.0 * EPS);
+        accumulated += CORNER_MERGE_ENABLED != 0
+            ? sampleIndirectRayCornerMerged(samplePosition, surface.normal, direction)
+            : sampleIndirectRay(samplePosition, surface.normal, direction);
     }
-    return accumulated / float(SAMPLE_COUNT);
+    return accumulated / float(INDIRECT_SAMPLE_COUNT);
 }
 
 vec3 shadeDiffuse(Hit surface) {
@@ -309,11 +376,11 @@ void main() {
     vec3 linearColor = traceCameraPath(Ray(CAM_POS, direction));
 
     vec3 frontColor = texture(texture1, fragTexCoord).rgb;
-    if (length(frontColor) > 0.0) {
-        outColor = vec4(frontColor, 1.0);
-    } else if (length(linearColor) > 0.0) {
-        outColor = vec4(pow(acesFilm(max(linearColor, vec3(0.0))), vec3(1.0 / 2.2)), 1.0);
-    } else {
-        outColor = vec4(texture(texture0, fragTexCoord).rgb, 1.0);
-    }
+    vec3 currentColor = length(frontColor) > 0.0
+        ? frontColor
+        : length(linearColor) > 0.0
+            ? pow(acesFilm(max(linearColor, vec3(0.0))), vec3(1.0 / 2.2))
+            : texture(texture0, fragTexCoord).rgb;
+    vec3 previousColor = texelFetch(texture3, ivec2(gl_FragCoord.xy), 0).rgb;
+    outColor = vec4(mix(currentColor, previousColor, TEMPORAL_BLEND), 1.0);
 }

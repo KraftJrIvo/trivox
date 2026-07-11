@@ -8,6 +8,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <iomanip>
+#include <sstream>
 #include <string>
 
 #define SPEED 0.1f
@@ -27,6 +29,14 @@ enum class RenderMode {
     PathTrace
 };
 
+static constexpr float RENDER_SCALE_OPTIONS[] = {0.0625f, 0.125f, 0.25f, 0.5f, 1.0f};
+static constexpr int INDIRECT_SAMPLE_OPTIONS[] = {4, 8, 16, 32, 64};
+static constexpr int SHADOW_SAMPLE_OPTIONS[] = {1, 2, 4, 8, 16};
+static constexpr int TEMPORAL_FRAME_OPTIONS[] = {0, 4, 16, 64, 256};
+static constexpr int PROBE_EXTRA_LEVEL_OPTIONS[] = {0, 1, 2};
+static constexpr int TUNING_OPTION_COUNT = 5;
+static constexpr int PROBE_OPTION_COUNT = 3;
+
 class RendererImpl : public Renderer {
     World::Ptr _w;
     Camera _cam;
@@ -40,9 +50,12 @@ class RendererImpl : public Renderer {
     RenderTexture2D _frontTex = {};
     RenderTexture2D _traceTex = {};
     RenderTexture2D _resCascTex[2] = {};
+    RenderTexture2D _cascadeAccumTex[2] = {};
     RenderTexture2D _pathtraceAccumTex[2] = {};
     int _activeResCascTex = 0;
     int _activePathtraceTex = 0;
+    int _activeCascadeAccumTex = 0;
+    int _cascadeTemporalFrame = 0;
     int _pathtraceSampleCount = 0;
     int _pathtraceMaxBounces = 6;
     int _pathtraceSamplesPerFrame = 1;
@@ -51,6 +64,11 @@ class RendererImpl : public Renderer {
     RenderMode _renderMode = RenderMode::Cascades;
     bool _drawGrids = false;
     bool _drawCasc = false;
+    int _indirectSampleCount = 32;
+    int _shadowSampleCount = 8;
+    int _temporalHistoryFrames = 0;
+    bool _jitterEnabled = false;
+    bool _cornerMergeEnabled = false;
 
     int res_casc_n_probe_extra_lvls = 0;
     int res_casc_lvl_0_res = 16;
@@ -60,9 +78,13 @@ class RendererImpl : public Renderer {
 
     void _resetCamPos();
     void _resetPathtraceAccumulation();
+    void _resetCascadeAccumulation();
     void _unloadRenderTargets();
     void _updateShaderSize();
     void _input();
+    void _drawTuningPanel();
+    void _handleTuningPanelInput();
+    void _copyDebugStateToClipboard();
     void _drawRoomGrids(Vector3 campos, bool front = false);
 
   public:
@@ -206,6 +228,10 @@ void RendererImpl::_unloadRenderTargets() {
         if (texture.id != 0) UnloadRenderTexture(texture);
         texture = {};
     }
+    for (auto &texture : _cascadeAccumTex) {
+        if (texture.id != 0) UnloadRenderTexture(texture);
+        texture = {};
+    }
     for (auto &texture : _pathtraceAccumTex) {
         if (texture.id != 0) UnloadRenderTexture(texture);
         texture = {};
@@ -225,6 +251,17 @@ void RendererImpl::_resetPathtraceAccumulation() {
     _activePathtraceTex = 0;
     _pathtraceSampleCount = 0;
     _pathtraceResetPending = false;
+}
+
+void RendererImpl::_resetCascadeAccumulation() {
+    for (auto &texture : _cascadeAccumTex) {
+        if (texture.id == 0) continue;
+        BeginTextureMode(texture);
+        ClearBackground(BLANK);
+        EndTextureMode();
+    }
+    _activeCascadeAccumTex = 0;
+    _cascadeTemporalFrame = 0;
 }
 
 void RendererImpl::_updateShaderSize() {
@@ -265,6 +302,15 @@ void RendererImpl::_updateShaderSize() {
             TraceLog(LOG_FATAL, "FBO: Unable to create radiance-cascade storage");
         SetTextureFilter(texture.texture, TEXTURE_FILTER_BILINEAR);
     }
+    for (auto &texture : _cascadeAccumTex) {
+        texture = loadColorRenderTexture((int)_sclWinSz.x, (int)_sclWinSz.y,
+                                         PIXELFORMAT_UNCOMPRESSED_R16G16B16A16);
+        if (texture.id == 0)
+            texture = LoadRenderTexture((int)_sclWinSz.x, (int)_sclWinSz.y);
+        if (texture.id == 0)
+            TraceLog(LOG_FATAL, "FBO: Unable to create cascade accumulation storage");
+        SetTextureFilter(texture.texture, TEXTURE_FILTER_BILINEAR);
+    }
     _pathtraceAvailable = true;
     for (auto &texture : _pathtraceAccumTex) {
         texture = loadColorRenderTexture((int)_sclWinSz.x, (int)_sclWinSz.y,
@@ -288,6 +334,7 @@ void RendererImpl::_updateShaderSize() {
             _renderMode = RenderMode::Cascades;
     }
     _activeResCascTex = 0;
+    _resetCascadeAccumulation();
     _resetPathtraceAccumulation();
     _lastReszTime = GetTime();
 }
@@ -298,6 +345,186 @@ void RendererImpl::_resetCamPos() {
     _cam.up = {0.0f, 1.0f, 0.0f};
     _cam.fovy = 70.0f;
     _cam.projection = CAMERA_PERSPECTIVE;
+}
+
+void RendererImpl::_copyDebugStateToClipboard() {
+    std::ostringstream out;
+    out << std::setprecision(9) << "{\"trivoxDebugState\":1";
+    out << ",\"camera\":{\"position\":[" << _cam.position.x << ',' << _cam.position.y << ',' << _cam.position.z
+        << "],\"target\":[" << _cam.target.x << ',' << _cam.target.y << ',' << _cam.target.z
+        << "],\"up\":[" << _cam.up.x << ',' << _cam.up.y << ',' << _cam.up.z
+        << "],\"fovy\":" << _cam.fovy << ",\"projection\":" << _cam.projection << '}';
+    out << ",\"renderer\":{\"mode\":\""
+        << (_renderMode == RenderMode::PathTrace ? "pathtrace" : "cascades")
+        << "\",\"scale\":" << _scale << ",\"drawGrids\":" << (_drawGrids ? "true" : "false")
+        << ",\"drawCascades\":" << (_drawCasc ? "true" : "false")
+        << ",\"indirectSamples\":" << _indirectSampleCount
+        << ",\"shadowSamples\":" << _shadowSampleCount
+        << ",\"probeCountPerAxis\":" << (1 << ((TRIVOX_MAX_LVL - TRIVOX_MIN_LVL) + res_casc_n_probe_extra_lvls))
+        << ",\"temporalFrames\":" << _temporalHistoryFrames
+        << ",\"jitter\":" << (_jitterEnabled ? "true" : "false")
+        << ",\"cornerMerge\":" << (_cornerMergeEnabled ? "true" : "false")
+        << ",\"ballsMoving\":" << (_w->_state.ballsMoving ? "true" : "false")
+        << ",\"pathtraceSamples\":" << _pathtraceSampleCount
+        << ",\"pathtraceMaxBounces\":" << _pathtraceMaxBounces
+        << ",\"pathtraceSamplesPerFrame\":" << _pathtraceSamplesPerFrame << '}';
+
+    out << ",\"entities\":[";
+    for (size_t i = 0; i < _w->_state.entities.count(); ++i) {
+        const Entity &entity = _w->_state.entities.get(i);
+        if (i) out << ',';
+        out << "{\"type\":" << static_cast<int>(entity.type) << ",\"roomRef\":" << entity.rrid
+            << ",\"position\":[" << entity.pos.x() << ',' << entity.pos.y() << ',' << entity.pos.z()
+            << "],\"velocity\":[" << entity.vel.x() << ',' << entity.vel.y() << ',' << entity.vel.z()
+            << "],\"params\":[";
+        for (int p = 0; p < TRIVOX_ENTITY_MAX_PARAMS; ++p) {
+            if (p) out << ',';
+            out << entity.params[p];
+        }
+        out << "]}";
+    }
+    out << ']';
+
+    out << ",\"shapes\":[";
+    for (size_t i = 0; i < _w->_state.shapes.count(); ++i) {
+        const Shape &shape = _w->_state.shapes.get(i);
+        if (i) out << ',';
+        out << "{\"type\":" << static_cast<unsigned int>(shape.type) << ",\"vertices\":[";
+        for (int v = 0; v < TRIVOX_MAX_VERTS_PER_SHAPE; ++v) {
+            if (v) out << ',';
+            out << shape.vIds[v];
+        }
+        out << "],\"color\":[" << shape.color.x() << ',' << shape.color.y() << ',' << shape.color.z()
+            << "],\"material\":" << shape.materialIdx << '}';
+    }
+    out << "],\"vertices\":[";
+    for (size_t i = 0; i < _w->_state.vertices.count(); ++i) {
+        const vec3 &vertex = _w->_state.vertices.get(i).v;
+        if (i) out << ',';
+        out << '[' << vertex.x() << ',' << vertex.y() << ',' << vertex.z() << ']';
+    }
+    out << "]}";
+
+    const std::string state = out.str();
+    SetClipboardText(state.c_str());
+    TraceLog(LOG_INFO, "DEBUG: Copied camera and scene state to clipboard (%u bytes)",
+             static_cast<unsigned int>(state.size()));
+}
+
+void RendererImpl::_drawTuningPanel() {
+    const Rectangle panel = {10.0f, 30.0f, 280.0f, 262.0f};
+    const float sliderX = 135.0f;
+    const float sliderWidth = 135.0f;
+    DrawRectangleRec(panel, Fade(BLACK, 0.78f));
+    DrawRectangleLinesEx(panel, 1.0f, Fade(LIGHTGRAY, 0.55f));
+    DrawText("CASCADE TUNING", 20, 38, 10, LIGHTGRAY);
+
+    auto drawSlider = [&](int y, const char *label, int optionIndex, int optionCount, const char *value) {
+        DrawText(label, 20, y - 5, 10, RAYWHITE);
+        DrawLine((int)sliderX, y, (int)(sliderX + sliderWidth), y, GRAY);
+        for (int i = 0; i < optionCount; ++i) {
+            const float x = sliderX + sliderWidth * float(i) / float(optionCount - 1);
+            DrawCircle((int)x, y, i == optionIndex ? 5.0f : 2.0f,
+                       i == optionIndex ? SKYBLUE : LIGHTGRAY);
+        }
+        const int textWidth = MeasureText(value, 10);
+        DrawText(value, (int)(sliderX + sliderWidth - textWidth), y - 14, 10, SKYBLUE);
+    };
+
+    int scaleIndex = 0;
+    int indirectIndex = 0;
+    int shadowIndex = 0;
+    int temporalIndex = 0;
+    int probeIndex = 0;
+    for (int i = 0; i < TUNING_OPTION_COUNT; ++i) {
+        if (std::abs(_scale - RENDER_SCALE_OPTIONS[i]) < 1e-6f) scaleIndex = i;
+        if (_indirectSampleCount == INDIRECT_SAMPLE_OPTIONS[i]) indirectIndex = i;
+        if (_shadowSampleCount == SHADOW_SAMPLE_OPTIONS[i]) shadowIndex = i;
+        if (_temporalHistoryFrames == TEMPORAL_FRAME_OPTIONS[i]) temporalIndex = i;
+    }
+    for (int i = 0; i < PROBE_OPTION_COUNT; ++i)
+        if (res_casc_n_probe_extra_lvls == PROBE_EXTRA_LEVEL_OPTIONS[i]) probeIndex = i;
+    const std::string scaleValue = std::to_string((int)std::lround(_scale * 100.0f)) + "%";
+    drawSlider(65, "Resolution", scaleIndex, TUNING_OPTION_COUNT, scaleValue.c_str());
+    drawSlider(94, "Indirect rays", indirectIndex, TUNING_OPTION_COUNT, std::to_string(_indirectSampleCount).c_str());
+    drawSlider(123, "Shadow rays", shadowIndex, TUNING_OPTION_COUNT, std::to_string(_shadowSampleCount).c_str());
+    const int probesPerAxis = 1 << ((TRIVOX_MAX_LVL - TRIVOX_MIN_LVL) + res_casc_n_probe_extra_lvls);
+    const std::string probeValue = std::to_string(probesPerAxis) + "^3";
+    drawSlider(152, "Finest probes", probeIndex, PROBE_OPTION_COUNT, probeValue.c_str());
+    const std::string temporalValue = _temporalHistoryFrames == 0
+        ? "Off" : std::to_string(_temporalHistoryFrames);
+    drawSlider(181, "Temporal frames", temporalIndex, TUNING_OPTION_COUNT, temporalValue.c_str());
+
+    const Rectangle cornerButton = {20.0f, 205.0f, 250.0f, 20.0f};
+    DrawRectangleRec(cornerButton, _cornerMergeEnabled ? Fade(GREEN, 0.55f) : Fade(DARKGRAY, 0.75f));
+    DrawRectangleLinesEx(cornerButton, 1.0f, LIGHTGRAY);
+    DrawText(_cornerMergeEnabled ? "CORNER MERGE: ON" : "CORNER MERGE: OFF", 82, 210, 10, RAYWHITE);
+
+    const Rectangle jitterButton = {20.0f, 233.0f, 250.0f, 20.0f};
+    DrawRectangleRec(jitterButton, _jitterEnabled ? Fade(GREEN, 0.55f) : Fade(DARKGRAY, 0.75f));
+    DrawRectangleLinesEx(jitterButton, 1.0f, LIGHTGRAY);
+    DrawText(_jitterEnabled ? "JITTER: ON" : "JITTER: OFF", 102, 238, 10, RAYWHITE);
+
+    const Rectangle movementButton = {20.0f, 261.0f, 250.0f, 20.0f};
+    DrawRectangleRec(movementButton, _w->_state.ballsMoving ? Fade(GREEN, 0.55f) : Fade(RED, 0.55f));
+    DrawRectangleLinesEx(movementButton, 1.0f, LIGHTGRAY);
+    const char *movementText = _w->_state.ballsMoving ? "BALLS: MOVING  [M]" : "BALLS: STOPPED  [M]";
+    DrawText(movementText, 74, 266, 10, RAYWHITE);
+}
+
+void RendererImpl::_handleTuningPanelInput() {
+    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) return;
+    const Vector2 mouse = GetMousePosition();
+    const float sliderX = 135.0f;
+    const float sliderWidth = 135.0f;
+    auto selectedOption = [&](float y, int optionCount = TUNING_OPTION_COUNT) {
+        const Rectangle hitbox = {sliderX - 8.0f, y - 11.0f, sliderWidth + 16.0f, 22.0f};
+        if (!CheckCollisionPointRec(mouse, hitbox)) return -1;
+        return std::clamp((int)std::lround((mouse.x - sliderX) / sliderWidth *
+                                          float(optionCount - 1)),
+                          0, optionCount - 1);
+    };
+
+    const int scaleIndex = selectedOption(65.0f);
+    if (scaleIndex >= 0 && _scale != RENDER_SCALE_OPTIONS[scaleIndex]) {
+        _scale = RENDER_SCALE_OPTIONS[scaleIndex];
+        _updateShaderSize();
+    }
+    const int indirectIndex = selectedOption(94.0f);
+    if (indirectIndex >= 0 && _indirectSampleCount != INDIRECT_SAMPLE_OPTIONS[indirectIndex]) {
+        _indirectSampleCount = INDIRECT_SAMPLE_OPTIONS[indirectIndex];
+        _resetCascadeAccumulation();
+    }
+    const int shadowIndex = selectedOption(123.0f);
+    if (shadowIndex >= 0 && _shadowSampleCount != SHADOW_SAMPLE_OPTIONS[shadowIndex]) {
+        _shadowSampleCount = SHADOW_SAMPLE_OPTIONS[shadowIndex];
+        _resetCascadeAccumulation();
+    }
+    const int probeIndex = selectedOption(152.0f, PROBE_OPTION_COUNT);
+    if (probeIndex >= 0 && res_casc_n_probe_extra_lvls != PROBE_EXTRA_LEVEL_OPTIONS[probeIndex]) {
+        res_casc_n_probe_extra_lvls = PROBE_EXTRA_LEVEL_OPTIONS[probeIndex];
+        _updateShaderSize();
+    }
+    const int temporalIndex = selectedOption(181.0f);
+    if (temporalIndex >= 0 && _temporalHistoryFrames != TEMPORAL_FRAME_OPTIONS[temporalIndex]) {
+        _temporalHistoryFrames = TEMPORAL_FRAME_OPTIONS[temporalIndex];
+        _resetCascadeAccumulation();
+    }
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+        CheckCollisionPointRec(mouse, Rectangle{20, 205, 250, 20})) {
+        _cornerMergeEnabled = !_cornerMergeEnabled;
+        _resetCascadeAccumulation();
+    }
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+        CheckCollisionPointRec(mouse, Rectangle{20, 233, 250, 20})) {
+        _jitterEnabled = !_jitterEnabled;
+        _resetCascadeAccumulation();
+    }
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+        CheckCollisionPointRec(mouse, Rectangle{20, 261, 250, 20})) {
+        _w->_state.ballsMoving = !_w->_state.ballsMoving;
+        _resetCascadeAccumulation();
+    }
 }
 
 void RendererImpl::_input() {
@@ -312,7 +539,9 @@ void RendererImpl::_input() {
     float vertical = ((IsKeyDown(KEY_E)) - (IsKeyDown(KEY_Q))) * speed;
 
     Vector2 mdelta = GetMouseDelta();
-    bool canRot = (_time - _lastReszTime > RESIZE_CD) && (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) || IsCursorHidden());
+    const bool mouseOverPanel = CheckCollisionPointRec(GetMousePosition(), Rectangle{10, 30, 280, 262});
+    bool canRot = !mouseOverPanel && (_time - _lastReszTime > RESIZE_CD) &&
+                  (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) || IsCursorHidden());
     Vector3 rot = canRot ? (Vector3{mdelta.x, mdelta.y, 0.0f} * 0.2f) : Vector3Zero();
 
     Vector3 dir = Vector3Normalize(Vector3{_cam.target.x - _cam.position.x,
@@ -386,8 +615,18 @@ void RendererImpl::_input() {
         }
     }
 
-    if (IsKeyPressed(KEY_R))
+    if (IsKeyPressed(KEY_R)) {
         _pathtraceResetPending = true;
+        _resetCascadeAccumulation();
+    }
+
+    if (IsKeyPressed(KEY_O))
+        _copyDebugStateToClipboard();
+
+    if (IsKeyPressed(KEY_M)) {
+        _w->_state.ballsMoving = !_w->_state.ballsMoving;
+        _resetCascadeAccumulation();
+    }
 
     float newScale = _scale;
     if (IsKeyPressed(KEY_EQUAL))
@@ -400,9 +639,13 @@ void RendererImpl::_input() {
         _updateShaderSize();
     }
 
+    _handleTuningPanelInput();
+
     if (Vector3Distance(previousPosition, _cam.position) > 1e-6f ||
-        Vector3Distance(previousTarget, _cam.target) > 1e-6f)
+        Vector3Distance(previousTarget, _cam.target) > 1e-6f) {
         _pathtraceResetPending = true;
+        _resetCascadeAccumulation();
+    }
 }
 
 void drawRoomGrid(vec3 A, vec3 B, vec3 C, vec3 D, int n1, int n2, vec3 campos,
@@ -459,6 +702,8 @@ void RendererImpl::startRender() {
     const std::string captureFrameValue = getEnvironmentValue("TRIVOX_CAPTURE_FRAME");
     const bool captureTargets = !getEnvironmentValue("TRIVOX_CAPTURE_TARGETS").empty();
     const bool freezeWorld = !getEnvironmentValue("TRIVOX_FREEZE_WORLD").empty();
+    if (!getEnvironmentValue("TRIVOX_CORNER_MERGE").empty())
+        _cornerMergeEnabled = true;
     const int captureFrame = captureFrameValue.empty() ? 3 : std::max(1, std::atoi(captureFrameValue.c_str()));
     const int pathtraceCaptureSamples = getEnvironmentInt("TRIVOX_PT_CAPTURE_SPP", 0, 0, 1000000);
     _pathtraceMaxBounces = getEnvironmentInt("TRIVOX_PT_BOUNCES", 6, 1, 12);
@@ -496,6 +741,10 @@ void RendererImpl::startRender() {
     while (!WindowShouldClose()) {
         if (_renderMode == RenderMode::Cascades && !freezeWorld)
             _w->update(std::min(GetFrameTime(), 0.1f));
+        if ((!freezeWorld && _w->_state.ballsMoving) || IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_RIGHT) ||
+            IsKeyDown(KEY_UP) || IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_PERIOD) ||
+            IsKeyDown(KEY_SLASH))
+            _cascadeTemporalFrame = 0;
 
         _time = GetTime();
 
@@ -595,18 +844,53 @@ void RendererImpl::startRender() {
             SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "N_PROBE_EXTRA_LVLS"), &res_casc_n_probe_extra_lvls, SHADER_UNIFORM_INT);
             SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "LVL_0_RES"), &res_casc_lvl_0_res, SHADER_UNIFORM_INT);
             SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "N_SHAPES"), &shapeCount, SHADER_UNIFORM_INT);
+            SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "INDIRECT_SAMPLE_COUNT"), &_indirectSampleCount, SHADER_UNIFORM_INT);
+            SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "SHADOW_SAMPLE_COUNT"), &_shadowSampleCount, SHADER_UNIFORM_INT);
+            const int cornerMerge = _cornerMergeEnabled ? 1 : 0;
+            const int sampleFrameIndex = _temporalHistoryFrames > 0 ? _cascadeTemporalFrame : 0;
+            const int accumulatedFrames = _temporalHistoryFrames > 0
+                ? std::min(_cascadeTemporalFrame, _temporalHistoryFrames - 1) : 0;
+            const float temporalBlend = accumulatedFrames > 0
+                ? float(accumulatedFrames) / float(accumulatedFrames + 1) : 0.0f;
+            SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "CORNER_MERGE_ENABLED"), &cornerMerge, SHADER_UNIFORM_INT);
+            SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "SAMPLE_FRAME_INDEX"), &sampleFrameIndex, SHADER_UNIFORM_INT);
+            SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "TEMPORAL_BLEND"), &temporalBlend, SHADER_UNIFORM_FLOAT);
 
-            BeginTextureMode(_traceTex);
+            const bool temporalEnabled = _temporalHistoryFrames > 0;
+            const int stochasticSampling = _jitterEnabled ? 1 : 0;
+            SetShaderValue(_raytraceShader, GetShaderLocation(_raytraceShader, "STOCHASTIC_SAMPLING_ENABLED"), &stochasticSampling, SHADER_UNIFORM_INT);
+            const int accumulationWrite = 1 - _activeCascadeAccumTex;
+            RenderTexture2D &raytraceTarget = temporalEnabled
+                ? _cascadeAccumTex[accumulationWrite] : _traceTex;
+            BeginTextureMode(raytraceTarget);
             ClearBackground(BLACK);
             BeginShaderMode(_raytraceShader);
             rlEnableShader(_raytraceShader.id);
             rlSetUniformSampler(GetShaderLocation(_raytraceShader, "texture1"), _frontTex.texture.id);
             rlSetUniformSampler(GetShaderLocation(_raytraceShader, "texture2"), cascadeTexture->texture.id);
+            rlSetUniformSampler(GetShaderLocation(_raytraceShader, "texture3"),
+                                _cascadeAccumTex[_activeCascadeAccumTex].texture.id);
             DrawTexturePro(_backTex.texture,
                            Rectangle{0, 0, (float)_backTex.texture.width, (float)-_backTex.texture.height},
                            Rectangle{0, 0, _sclWinSz.x, _sclWinSz.y},
                            Vector2Zero(), 0, WHITE);
             EndShaderMode();
+            EndTextureMode();
+
+            if (temporalEnabled) {
+                _activeCascadeAccumTex = accumulationWrite;
+                ++_cascadeTemporalFrame;
+                BeginTextureMode(_traceTex);
+                ClearBackground(BLACK);
+                DrawTexturePro(_cascadeAccumTex[_activeCascadeAccumTex].texture,
+                               Rectangle{0, 0,
+                                         (float)_cascadeAccumTex[_activeCascadeAccumTex].texture.width,
+                                         (float)-_cascadeAccumTex[_activeCascadeAccumTex].texture.height},
+                               Rectangle{0, 0, _sclWinSz.x, _sclWinSz.y},
+                               Vector2Zero(), 0, WHITE);
+            } else {
+                BeginTextureMode(_traceTex);
+            }
             const std::string status = "RC  " + std::to_string(GetFPS()) + " fps";
             DrawText(status.c_str(), 10, 10, 10, RED);
             EndTextureMode();
@@ -622,6 +906,7 @@ void RendererImpl::startRender() {
                 Rectangle{0, 0, (float)cascadeTexture->texture.width, (float)-cascadeTexture->texture.height},
                 Vector2{0, 0}, WHITE);
         }
+        _drawTuningPanel();
         EndDrawing();
 
         ++frameNumber;

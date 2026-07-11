@@ -12,6 +12,7 @@ typedef Arena<TRIVOX_MAX_ENTITIES, Entity>                     WorldEntities;
 typedef CellPyramid<TRIVOX_MAX_ROOMS, TRIVOX_MIN_LVL, TRIVOX_MAX_LVL> WorldCellPyramid;
 
 struct WorldState {
+    bool                ballsMoving = true;
     WorldVertices       vertices;
     WorldShapeUVs       shUVs;
     WorldShapeMaterials shMaterials;

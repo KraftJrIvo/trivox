@@ -21,6 +21,8 @@ void initBounceBall(Entity* ent, u8 rrid, WorldState* ws) {
 void updateBounceBall(Entity* ent, WorldState* ws, float delta) {
     auto& shape = ws->shapes.at(ent->firstShapeIdx[0]);
     auto& c = ws->vertices.at(shape.vIds[0]).v;
+    if (shape.materialIdx == SHAPE_MATERIAL_EMISSIVE && !ws->ballsMoving)
+        return;
     c += delta * ent->vel * SPEED;
     const auto& rr = ws->roomRefs.get(ent->rrid);
     const auto& room = ws->rooms.get(rr.idx - 1);
@@ -30,9 +32,7 @@ void updateBounceBall(Entity* ent, WorldState* ws, float delta) {
     vec3 sgn = {locV.x() / abs(locV.x()), locV.y() / abs(locV.y()), locV.z() / abs(locV.z())};
     auto R = ws->vertices.at(shape.vIds[1]).v.x() * 1.1f;
     
-    static bool moving = true;
-    if (IsKeyPressed(KEY_M)) moving = !moving;
-    if (shape.materialIdx == 1 && moving)
+    if (shape.materialIdx == SHAPE_MATERIAL_EMISSIVE)
         locV = vec3{
             ((locC.x() - R < 0) || ( locC.x() + R > room.size.x())) ? -locV.x() : locV.x(),
             ((locC.y() - R < 0) || ( locC.y() + R > room.size.y())) ? -locV.y() : locV.y(),
@@ -40,7 +40,7 @@ void updateBounceBall(Entity* ent, WorldState* ws, float delta) {
         };
     else
         locV = {0,0,0};
-    if (shape.materialIdx != 1)
+    if (shape.materialIdx != SHAPE_MATERIAL_EMISSIVE)
         locV = vec3{
             IsKeyDown(KEY_LEFT) ? -1.1f : IsKeyDown(KEY_RIGHT) ? 1.1f : 0.0f,
             IsKeyDown(KEY_PERIOD) ? -1.1f : IsKeyDown(KEY_SLASH) ? 1.1f : 0.0f,
